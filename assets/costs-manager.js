@@ -653,7 +653,7 @@ const CostsManager = (() => {
       `${escapeHTML(j['เลขที่']||'')} — ${escapeHTML((j['รายละเอียด']||j['ชื่อโครงการ']||'').slice(0,40))}</option>`
     ).join('');
 
-    App.openModal(idx === null ? '+ เพิ่มค่าใช้จ่าย' : '✏️ แก้ไขค่าใช้จ่าย', `
+    App.openModal({ title: idx === null ? '+ เพิ่มค่าใช้จ่าย' : '✏️ แก้ไขค่าใช้จ่าย', large: true, body: `
       <div style="max-height:60vh;overflow-y:auto;padding-right:4px;">
         <div class="cm-form-grid cols2" style="margin-bottom:12px;">
           <div class="cm-field">
@@ -747,7 +747,7 @@ const CostsManager = (() => {
           <div id="cfReceiptStatus" style="font-size:12px;color:#6b7280;margin-top:4px;"></div>
         </div>
       </div>
-    `, { wide: true });
+    ` });
 
     // Wire live calculations
     const amtCalc = () => {
@@ -920,12 +920,12 @@ const CostsManager = (() => {
       { v:'project', label:'📁 ตามโครงการ' },
     ];
 
-    App.openModal('📊 สร้างรายงานค่าใช้จ่าย', `
+    App.openModal({ title: '📊 สร้างรายงานค่าใช้จ่าย', body: `
       <div class="cm-rep-type-grid">
         ${types.map(t=>`<button class="cm-rep-type-btn ${_repConfig.type===t.v?'active':''}" data-rt="${t.v}">${t.label}</button>`).join('')}
       </div>
       <div id="crpOptions"></div>
-    `, { wide: false });
+    ` });
 
     const modal = document.getElementById('modal');
     modal.querySelectorAll('.cm-rep-type-btn').forEach(btn => {

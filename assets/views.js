@@ -596,6 +596,13 @@ const Views = (() => {
     }
   }
 
+  // -------------------- HELPERS --------------------
+  function collectUnique(view, key) {
+    const vals = new Set();
+    (state.data[view] || []).forEach(r => { if (r[key]) vals.add(r[key]); });
+    return [...vals].sort();
+  }
+
   // -------------------- JOBS (ชีต1) --------------------
   function jobsView() {
     renderGenericTable({
