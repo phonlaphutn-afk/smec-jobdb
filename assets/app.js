@@ -27,7 +27,7 @@ const App = (() => {
     delivery: { sheetName: CONFIG.SHEETS.delivery, cols: ['Timestamp','วันที่','เลขที่ใบส่งของ','ประเภท','บริษัท','ผู้จัดทำ/ผู้แจ้ง','แผนก','รายละเอียด/อ้างอิง','PO','รายการสินค้า','ไฟล์เอกสาร'] },
     gatepass: { sheetName: CONFIG.SHEETS.gatepass, cols: ['Timestamp','เลขที่','วันที่','บริษัท','ผู้ขออนุญาต','ตำแหน่ง','แผนก','เหตุผล','รายการ','ยานพาหนะ','สี','เอกสารอ้างอิง','แผนงาน'] },
     schedule: { sheetName: CONFIG.SHEETS.schedule, cols: ['Task_ID','DocNo','TaskName','Assignee','StartDate','EndDate','Status','LastUpdated','ActualStartDate','ActualEndDate'] },
-    costs: { sheetName: CONFIG.SHEETS.costs, cols: ['Code','วันที่','เลขที่งาน','เลขที่โครงการ','ประเภท','ผู้ขาย / Sup','รายละเอียด','จำนวน','ราคา / หน่วย','จำนวนเงินรวม','VAT','จำนวนเงินรวม Vat','ผู้บันทึก','หมายเหตุ','วันที่ บันทึก'] }
+    costs: { sheetName: CONFIG.SHEETS.costs, cols: ['Code','วันที่','เลขที่งาน','เลขที่โครงการ','ประเภท','ผู้ขาย / Sup','รายละเอียด','จำนวน','ราคา / หน่วย','จำนวนเงินรวม','VAT','จำนวนเงินรวม Vat','ผู้บันทึก','หมายเหตุ','วันที่ บันทึก','สถานะจ่าย','ใบเสร็จ'] }
   };
 
   const FILE_FIELDS = {

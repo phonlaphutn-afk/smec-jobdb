@@ -215,6 +215,18 @@ const Views = (() => {
   });
 
   // -------------------- DASHBOARD --------------------
+  let _chartJsLoaded = false;
+  async function _loadChartJs() {
+    if (_chartJsLoaded || window.Chart) { _chartJsLoaded = true; return; }
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+      s.onload = () => { _chartJsLoaded = true; res(); };
+      s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+
   function dashboard() {
     const topbar = document.getElementById('topbar');
     const root = document.getElementById('viewRoot');
@@ -224,87 +236,198 @@ const Views = (() => {
     const gp = state.data.gatepass;
     const sched = state.data.schedule;
     const costs = state.data.costs;
+    const today = new Date(); today.setHours(0,0,0,0);
 
+    // ---- Stats calculations ----
     const statusCount = {};
     for (const j of jobs) {
       const s = (j['สถานะ'] || '').toString().trim() || 'ไม่ระบุ';
       statusCount[s] = (statusCount[s] || 0) + 1;
     }
-    const totalCostsVat = costs.reduce((s, r) => s + (Number(r['จำนวนเงินรวม Vat']) || 0), 0);
-    const totalCostsNoVat = costs.reduce((s, r) => s + (Number(r['จำนวนเงินรวม']) || 0), 0);
+    const typeCount = {};
+    for (const j of jobs) {
+      const t = (j['ประเภท'] || '').toString().trim() || 'ไม่ระบุ';
+      typeCount[t] = (typeCount[t] || 0) + 1;
+    }
+    const assigneeCount = {};
+    for (const j of jobs) {
+      const a = (j['ผู้รับผิดชอบ'] || '').toString().trim() || 'ไม่ระบุ';
+      assigneeCount[a] = (assigneeCount[a] || 0) + 1;
+    }
 
-    // Recent jobs
-    const recentJobs = [...jobs].sort((a,b) => {
-      const da = a['วันที่'] instanceof Date ? a['วันที่'].getTime() : new Date(a['วันที่']||0).getTime();
-      const db_ = b['วันที่'] instanceof Date ? b['วันที่'].getTime() : new Date(b['วันที่']||0).getTime();
-      return db_ - da;
-    }).slice(0, 8);
+    // Monthly trend (last 12 months)
+    const monthlyMap = {};
+    const now = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      monthlyMap[key] = 0;
+    }
+    for (const j of jobs) {
+      const d = j['วันที่'] instanceof Date ? j['วันที่'] : (j['วันที่'] ? new Date(j['วันที่']) : null);
+      if (!d || isNaN(d.getTime())) continue;
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      if (key in monthlyMap) monthlyMap[key]++;
+    }
 
-    // overdue tasks (Schedule)
-    const today = new Date(); today.setHours(0,0,0,0);
+    // Outstanding = jobs ที่ยังไม่เสร็จ
+    const outstanding = jobs.filter(j => {
+      const s = (j['สถานะ'] || '').toString().trim();
+      return !/เสร็จ|ส่งงานแล้ว|completed|close/i.test(s);
+    });
+
+    // Overdue schedule tasks
     const overdue = sched.filter(t => {
       if (!t.EndDate) return false;
       const ed = t.EndDate instanceof Date ? t.EndDate : new Date(t.EndDate);
-      const status = (t.Status||'').trim();
-      return ed < today && !/เสร็จ|สำเร็จ|complete/i.test(status);
+      return ed < today && !/เสร็จ|สำเร็จ|complete/i.test((t.Status||'').trim());
     });
 
+    const totalCostsVat = costs.reduce((s, r) => s + (Number(r['จำนวนเงินรวม Vat']) || 0), 0);
+    const totalCostsNoVat = costs.reduce((s, r) => s + (Number(r['จำนวนเงินรวม']) || 0), 0);
+
+    // Recent jobs sorted by date
+    const recentJobs = [...jobs].sort((a,b) => {
+      const da = (a['วันที่ลงบันทึก']||a['วันที่']); const db_ = (b['วันที่ลงบันทึก']||b['วันที่']);
+      const ta = da instanceof Date ? da.getTime() : new Date(da||0).getTime();
+      const tb = db_ instanceof Date ? db_.getTime() : new Date(db_||0).getTime();
+      return tb - ta;
+    }).slice(0, 10);
+
+    const lastJob = recentJobs[0] || null;
+
+    // Top 5 assignees
+    const topAssignees = Object.entries(assigneeCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+    // ---- Render topbar ----
     topbar.innerHTML = `
       <div class="title">หน้าแรก / Dashboard</div>
-      <div class="sub">${state.folderName ? 'โฟลเดอร์: ' + escapeHTML(state.folderName) : ''}</div>
+      <div class="sub">${state.folderName ? escapeHTML(state.folderName) : ''}</div>
       <div class="toolbar">
+        <button class="btn btn-success" id="btnQuickAdd2">➕ งานใหม่</button>
         <button class="btn btn-primary" id="btnSaveAll">💾 บันทึกทั้งหมด</button>
       </div>
     `;
     document.getElementById('btnSaveAll').onclick = () => App.saveAll();
+    document.getElementById('btnQuickAdd2').onclick = () => Forms.openJob(null);
 
-    // Most recent job for quick print
-    const lastJob = jobs.length ? [...jobs].sort((a,b) => {
-      const da = a['วันที่ลงบันทึก'] instanceof Date ? a['วันที่ลงบันทึก'].getTime() : new Date(a['วันที่ลงบันทึก']||a['วันที่']||0).getTime();
-      const db = b['วันที่ลงบันทึก'] instanceof Date ? b['วันที่ลงบันทึก'].getTime() : new Date(b['วันที่ลงบันทึก']||b['วันที่']||0).getTime();
-      return db - da;
-    })[0] : null;
-
+    // ---- Render HTML ----
     root.innerHTML = `
-      <!-- Quick action panel -->
-      <div class="panel" style="border-top:3px solid var(--primary);">
-        <div class="panel-header">⚡ ทำงานด่วน</div>
-        <div class="panel-body" style="display:flex;gap:12px;flex-wrap:wrap;">
-          <button class="btn btn-success" id="btnQuickAdd" style="font-size:15px;padding:12px 22px;">
-            ➕ บันทึกงานใหม่ (ใบแจ้งงาน)
+      <!-- Quick actions -->
+      <div class="panel" style="border-top:3px solid var(--primary);margin-bottom:16px;">
+        <div class="panel-body" style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;">
+          <button class="btn btn-success" id="btnQuickAdd" style="font-size:14px;padding:10px 20px;">➕ บันทึกงานใหม่</button>
+          <button class="btn btn-primary" id="btnPrintLast" ${lastJob?'':'disabled'} style="font-size:14px;padding:10px 20px;">
+            🖨 พิมพ์ใบล่าสุด ${lastJob ? '('+escapeHTML(lastJob['เลขที่']||'')+')' : ''}
           </button>
-          <button class="btn btn-primary" id="btnPrintLast" ${lastJob ? '' : 'disabled'} style="font-size:15px;padding:12px 22px;">
-            🖨 พิมพ์ใบแจ้งงานล่าสุด ${lastJob ? '('+escapeHTML(lastJob['เลขที่']||'')+')' : ''}
-          </button>
-          <button class="btn" id="btnGoJobsAll" style="font-size:14px;padding:12px 18px;">
-            📋 ดูใบงานทั้งหมด
-          </button>
+          <button class="btn" id="btnGoJobsAll" style="font-size:14px;padding:10px 18px;">📋 ใบงานทั้งหมด</button>
+          <button class="btn" id="btnGoOutstanding" style="font-size:14px;padding:10px 18px;">⏳ งานค้าง (${outstanding.length})</button>
         </div>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-card primary"><div class="label">ใบงานทั้งหมด</div><div class="value">${jobs.length.toLocaleString()}</div><div class="delta">รายการในชีต1</div></div>
-        <div class="stat-card success"><div class="label">ใบส่งของชั่วคราว</div><div class="value">${delivery.length.toLocaleString()}</div><div class="delta">รายการ</div></div>
-        <div class="stat-card warning"><div class="label">GatePass</div><div class="value">${gp.length.toLocaleString()}</div><div class="delta">ใบขอผ่านประตู</div></div>
-        <div class="stat-card primary"><div class="label">Schedule Tasks</div><div class="value">${sched.length.toLocaleString()}</div><div class="delta">${overdue.length} เลยกำหนด</div></div>
-        <div class="stat-card success"><div class="label">ยอดค่าใช้จ่าย (รวม VAT)</div><div class="value">${fmtMoney(totalCostsVat)}</div><div class="delta">${costs.length} รายการ</div></div>
-        <div class="stat-card warning"><div class="label">ยอดค่าใช้จ่าย (ไม่รวม VAT)</div><div class="value">${fmtMoney(totalCostsNoVat)}</div><div class="delta">บาท</div></div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-header">สรุปสถานะใบงาน</div>
-        <div class="panel-body">
-          ${Object.keys(statusCount).length === 0 ? '<div class="muted">ยังไม่มีข้อมูลใบงาน</div>' :
-            Object.entries(statusCount).map(([s,c]) =>
-              `<div style="display:inline-block;margin:4px 8px 4px 0;">${renderStatusPill(s)} <b>${c}</b></div>`
-            ).join('')}
+      <!-- Stats cards -->
+      <div class="stats-grid" style="margin-bottom:16px;">
+        <div class="stat-card primary">
+          <div class="label">ใบงานทั้งหมด</div>
+          <div class="value">${jobs.length.toLocaleString()}</div>
+          <div class="delta">รายการ</div>
+        </div>
+        <div class="stat-card warning">
+          <div class="label">งานค้าง / ยังไม่เสร็จ</div>
+          <div class="value">${outstanding.length.toLocaleString()}</div>
+          <div class="delta">${jobs.length ? Math.round(outstanding.length/jobs.length*100) : 0}% ของทั้งหมด</div>
+        </div>
+        <div class="stat-card success">
+          <div class="label">ใบส่งของ / GatePass</div>
+          <div class="value">${delivery.length + gp.length}</div>
+          <div class="delta">${delivery.length} ใบส่งของ · ${gp.length} gatepass</div>
+        </div>
+        <div class="stat-card primary">
+          <div class="label">งาน Schedule เลยกำหนด</div>
+          <div class="value" style="color:${overdue.length>0?'var(--danger)':'inherit'}">${overdue.length}</div>
+          <div class="delta">${sched.length} งานทั้งหมด</div>
+        </div>
+        <div class="stat-card success">
+          <div class="label">ยอดค่าใช้จ่าย (ไม่รวม VAT)</div>
+          <div class="value" style="font-size:1.1rem;">${fmtMoney(totalCostsNoVat)}</div>
+          <div class="delta">บาท</div>
+        </div>
+        <div class="stat-card warning">
+          <div class="label">ยอดค่าใช้จ่าย (รวม VAT)</div>
+          <div class="value" style="font-size:1.1rem;">${fmtMoney(totalCostsVat)}</div>
+          <div class="delta">${costs.length} รายการ</div>
         </div>
       </div>
 
-      <div class="panel">
-        <div class="panel-header">งานล่าสุด <span class="right"><button class="btn btn-sm" id="btnGoJobs">ดูทั้งหมด</button></span></div>
+      <!-- Charts row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;" id="chartsRow">
+        <div class="panel" style="margin:0;">
+          <div class="panel-header">สถานะใบงาน</div>
+          <div class="panel-body" style="padding:12px;height:220px;display:flex;align-items:center;justify-content:center;">
+            <canvas id="chartStatus"></canvas>
+          </div>
+        </div>
+        <div class="panel" style="margin:0;">
+          <div class="panel-header">ประเภทงาน</div>
+          <div class="panel-body" style="padding:12px;height:220px;display:flex;align-items:center;justify-content:center;">
+            <canvas id="chartType"></canvas>
+          </div>
+        </div>
+        <div class="panel" style="margin:0;">
+          <div class="panel-header">ผู้รับผิดชอบ (Top 5)</div>
+          <div class="panel-body" style="padding:12px;height:220px;display:flex;align-items:center;justify-content:center;">
+            <canvas id="chartAssignee"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monthly trend chart -->
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-header">จำนวนงานใหม่รายเดือน (12 เดือนล่าสุด)</div>
+        <div class="panel-body" style="padding:12px;height:180px;">
+          <canvas id="chartMonthly"></canvas>
+        </div>
+      </div>
+
+      <!-- Outstanding jobs -->
+      <div class="panel" style="margin-bottom:16px;" id="outstandingPanel">
+        <div class="panel-header">
+          ⏳ งานค้าง / ยังไม่เสร็จ (${outstanding.length} รายการ)
+          <span class="right"><button class="btn btn-sm" id="btnGoJobs">ดูใบงานทั้งหมด</button></span>
+        </div>
         <div class="panel-body" style="padding:0;">
-          <div class="table-wrap" style="border:none;border-radius:0;max-height:320px;">
+          <div class="table-wrap" style="border:none;border-radius:0;max-height:300px;">
+            <table class="data">
+              <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th><th></th></tr></thead>
+              <tbody>
+                ${outstanding.length === 0
+                  ? '<tr><td colspan="6" class="muted" style="text-align:center;padding:30px;">✅ ไม่มีงานค้าง</td></tr>'
+                  : outstanding.slice(0, 20).map(j => {
+                      const idx = state.data.jobs.indexOf(j);
+                      return `<tr>
+                        <td>${fmtDate(j['วันที่'])}</td>
+                        <td>${escapeHTML(j['เลขที่']||'')}</td>
+                        <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0,100))}${(j['รายละเอียด']||'').toString().length>100?'…':''}</td>
+                        <td>${escapeHTML(j['ผู้รับผิดชอบ']||'')}</td>
+                        <td>${renderStatusPill(j['สถานะ'])}</td>
+                        <td class="actions">
+                          <button class="btn btn-sm" data-editjob="${idx}">แก้ไข</button>
+                          <button class="btn btn-sm btn-primary" data-printjob="${idx}">🖨</button>
+                        </td>
+                      </tr>`;
+                    }).join('')}
+                ${outstanding.length > 20 ? `<tr><td colspan="6" class="muted" style="text-align:center;padding:10px;">และอีก ${outstanding.length - 20} รายการ...</td></tr>` : ''}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent jobs -->
+      <div class="panel">
+        <div class="panel-header">งานล่าสุด (10 รายการ)</div>
+        <div class="panel-body" style="padding:0;">
+          <div class="table-wrap" style="border:none;border-radius:0;max-height:300px;">
             <table class="data">
               <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th></tr></thead>
               <tbody>
@@ -312,7 +435,7 @@ const Views = (() => {
                   recentJobs.map(j => `<tr>
                     <td>${fmtDate(j['วันที่'])}</td>
                     <td>${escapeHTML(j['เลขที่']||'')}</td>
-                    <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0, 120))}${(j['รายละเอียด']||'').toString().length>120?'…':''}</td>
+                    <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0,100))}${(j['รายละเอียด']||'').toString().length>100?'…':''}</td>
                     <td>${escapeHTML(j['ผู้รับผิดชอบ']||'')}</td>
                     <td>${renderStatusPill(j['สถานะ'])}</td>
                   </tr>`).join('')}
@@ -323,18 +446,18 @@ const Views = (() => {
       </div>
 
       ${overdue.length > 0 ? `
-      <div class="panel">
-        <div class="panel-header">⚠️ งานที่เลยกำหนด (${overdue.length})</div>
+      <div class="panel" style="margin-top:16px;">
+        <div class="panel-header">⚠️ Schedule เลยกำหนด (${overdue.length} งาน)</div>
         <div class="panel-body" style="padding:0;">
-          <div class="table-wrap" style="border:none;border-radius:0;max-height:280px;">
+          <div class="table-wrap" style="border:none;border-radius:0;max-height:240px;">
             <table class="data">
               <thead><tr><th>DocNo</th><th>งาน</th><th>ผู้รับผิดชอบ</th><th>กำหนดส่ง</th><th>สถานะ</th></tr></thead>
               <tbody>
-                ${overdue.slice(0, 20).map(t => `<tr>
+                ${overdue.slice(0,15).map(t=>`<tr>
                   <td>${escapeHTML(t.DocNo||'')}</td>
                   <td>${escapeHTML(t.TaskName||'')}</td>
                   <td>${escapeHTML(t.Assignee||'')}</td>
-                  <td>${fmtDate(t.EndDate)}</td>
+                  <td style="color:var(--danger);">${fmtDate(t.EndDate)}</td>
                   <td>${renderStatusPill(t.Status)}</td>
                 </tr>`).join('')}
               </tbody>
@@ -344,18 +467,132 @@ const Views = (() => {
       </div>` : ''}
     `;
 
-    const btn = document.getElementById('btnGoJobs');
-    if (btn) btn.onclick = () => render('jobs');
-    const btn2 = document.getElementById('btnGoJobsAll');
-    if (btn2) btn2.onclick = () => render('jobs');
-    const btnAdd = document.getElementById('btnQuickAdd');
-    if (btnAdd) btnAdd.onclick = () => Forms.openJob(null);
-    const btnPrint = document.getElementById('btnPrintLast');
-    if (btnPrint && lastJob) {
-      btnPrint.onclick = () => {
+    // Wire buttons
+    const q = id => document.getElementById(id);
+    if (q('btnQuickAdd')) q('btnQuickAdd').onclick = () => Forms.openJob(null);
+    if (q('btnGoJobs')) q('btnGoJobs').onclick = () => render('jobs');
+    if (q('btnGoJobsAll')) q('btnGoJobsAll').onclick = () => render('jobs');
+    if (q('btnGoOutstanding')) q('btnGoOutstanding').onclick = () => {
+      q('outstandingPanel').scrollIntoView({ behavior: 'smooth' });
+    };
+    if (q('btnPrintLast') && lastJob) {
+      q('btnPrintLast').onclick = () => {
         const idx = state.data.jobs.indexOf(lastJob);
         if (idx >= 0) Print.printWorkRequest(idx);
       };
+    }
+    root.querySelectorAll('[data-editjob]').forEach(b => {
+      b.onclick = () => Forms.openJob(parseInt(b.dataset.editjob, 10));
+    });
+    root.querySelectorAll('[data-printjob]').forEach(b => {
+      b.onclick = () => Print.printWorkRequest(parseInt(b.dataset.printjob, 10));
+    });
+
+    // Load Chart.js and render charts async
+    _loadChartJs().then(() => {
+      _renderDashboardCharts({ statusCount, typeCount, topAssignees, monthlyMap });
+    }).catch(() => {
+      document.getElementById('chartsRow').innerHTML =
+        '<div class="muted" style="padding:20px;text-align:center;grid-column:1/-1;">ไม่สามารถโหลด Chart.js ได้ (ต้องมีอินเทอร์เน็ต)</div>';
+    });
+  }
+
+  function _renderDashboardCharts({ statusCount, typeCount, topAssignees, monthlyMap }) {
+    const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16'];
+    const MONTHS_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+    function makeShortMonth(key) {
+      const [y, m] = key.split('-');
+      return MONTHS_TH[parseInt(m,10)-1] + ' ' + String(parseInt(y)+543).slice(-2);
+    }
+
+    // Destroy old charts if any (prevent duplicate canvas errors)
+    ['chartStatus','chartType','chartAssignee','chartMonthly'].forEach(id => {
+      const canvas = document.getElementById(id);
+      if (!canvas) return;
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+    });
+
+    const chartDefaults = {
+      plugins: { legend: { labels: { font: { family: 'inherit', size: 11 }, boxWidth: 12 } } }
+    };
+
+    // Status — Doughnut
+    const statusCanvas = document.getElementById('chartStatus');
+    if (statusCanvas && Object.keys(statusCount).length > 0) {
+      new Chart(statusCanvas, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(statusCount),
+          datasets: [{ data: Object.values(statusCount), backgroundColor: COLORS, borderWidth: 2 }]
+        },
+        options: { responsive: true, maintainAspectRatio: true, ...chartDefaults,
+          plugins: { ...chartDefaults.plugins, tooltip: { callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.raw} งาน`
+          }}}
+        }
+      });
+    }
+
+    // Type — Doughnut
+    const typeCanvas = document.getElementById('chartType');
+    if (typeCanvas && Object.keys(typeCount).length > 0) {
+      new Chart(typeCanvas, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(typeCount),
+          datasets: [{ data: Object.values(typeCount), backgroundColor: COLORS.slice(2), borderWidth: 2 }]
+        },
+        options: { responsive: true, maintainAspectRatio: true, ...chartDefaults,
+          plugins: { ...chartDefaults.plugins, tooltip: { callbacks: {
+            label: ctx => ` ${ctx.label}: ${ctx.raw} งาน`
+          }}}
+        }
+      });
+    }
+
+    // Assignee — Horizontal Bar
+    const assigneeCanvas = document.getElementById('chartAssignee');
+    if (assigneeCanvas && topAssignees.length > 0) {
+      new Chart(assigneeCanvas, {
+        type: 'bar',
+        data: {
+          labels: topAssignees.map(a => a[0]),
+          datasets: [{ label: 'จำนวนงาน', data: topAssignees.map(a => a[1]),
+            backgroundColor: '#3b82f6', borderRadius: 4 }]
+        },
+        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: true,
+          plugins: { legend: { display: false } },
+          scales: { x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } },
+            y: { ticks: { font: { size: 11 } } } }
+        }
+      });
+    }
+
+    // Monthly trend — Line
+    const monthlyCanvas = document.getElementById('chartMonthly');
+    if (monthlyCanvas) {
+      const labels = Object.keys(monthlyMap).map(makeShortMonth);
+      const data = Object.values(monthlyMap);
+      new Chart(monthlyCanvas, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'งานใหม่', data,
+            borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
+            fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#3b82f6'
+          }]
+        },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { font: { size: 11 } } },
+            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } }
+          }
+        }
+      });
     }
   }
 
@@ -401,302 +638,39 @@ const Views = (() => {
 
   // -------------------- DELIVERY --------------------
   function deliveryView() {
-    renderGenericTable({
-      view: 'delivery',
-      title: 'ใบส่งของชั่วคราว',
-      columns: [
-        { key: 'วันที่', label: 'วันที่', type: 'date' },
-        { key: 'เลขที่ใบส่งของ', label: 'เลขที่ใบส่งของ' },
-        { key: 'ประเภท', label: 'ประเภท' },
-        { key: 'บริษัท', label: 'บริษัท' },
-        { key: 'ผู้จัดทำ/ผู้แจ้ง', label: 'ผู้จัดทำ' },
-        { key: 'แผนก', label: 'แผนก' },
-        { key: 'PO', label: 'PO' },
-        { key: 'รายละเอียด/อ้างอิง', label: 'อ้างอิง', type: 'long' },
-        { key: 'รายการสินค้า', label: 'รายการสินค้า', type: 'long' },
-        { key: 'ไฟล์เอกสาร', label: 'ไฟล์', type: 'file' }
-      ],
-      filterFields: [
-        { key: 'ประเภท', label: 'ประเภท', type: 'select', options: collectUnique('delivery', 'ประเภท') },
-        { key: 'บริษัท', label: 'บริษัท', type: 'select', options: collectUnique('delivery', 'บริษัท') },
-        { key: 'แผนก', label: 'แผนก', type: 'select', options: collectUnique('delivery', 'แผนก') }
-      ],
-      onAdd: () => Forms.openDelivery(null),
-      onEdit: idx => Forms.openDelivery(idx),
-      onDelete: async idx => {
-        state.data.delivery.splice(idx, 1);
-        await App.saveAll();
-        render('delivery');
-      }
-    });
+    LogisticsManager.initDelivery();
+    LogisticsManager.renderDelivery();
   }
 
   // -------------------- GATEPASS --------------------
   function gatepassView() {
-    renderGenericTable({
-      view: 'gatepass',
-      title: 'GatePass — ใบขออนุญาตผ่านประตู',
-      columns: [
-        { key: 'วันที่', label: 'วันที่', type: 'date' },
-        { key: 'เลขที่', label: 'เลขที่' },
-        { key: 'บริษัท', label: 'บริษัท' },
-        { key: 'ผู้ขออนุญาต', label: 'ผู้ขออนุญาต' },
-        { key: 'แผนก', label: 'แผนก' },
-        { key: 'เหตุผล', label: 'เหตุผล' },
-        { key: 'รายการ', label: 'รายการ', type: 'long' },
-        { key: 'ยานพาหนะ', label: 'ยานพาหนะ' },
-        { key: 'สี', label: 'สี' },
-        { key: 'เอกสารอ้างอิง', label: 'เอกสาร', type: 'file' }
-      ],
-      filterFields: [
-        { key: 'บริษัท', label: 'บริษัท', type: 'select', options: collectUnique('gatepass', 'บริษัท') },
-        { key: 'แผนก', label: 'แผนก', type: 'select', options: collectUnique('gatepass', 'แผนก') }
-      ],
-      onAdd: () => Forms.openGatepass(null),
-      onEdit: idx => Forms.openGatepass(idx),
-      onDelete: async idx => {
-        state.data.gatepass.splice(idx, 1);
-        await App.saveAll();
-        render('gatepass');
-      }
-    });
+    LogisticsManager.initGatePass();
+    LogisticsManager.renderGatePass();
   }
 
   // -------------------- SCHEDULE --------------------
   function scheduleView() {
-    const topbar = document.getElementById('topbar');
-    const root = document.getElementById('viewRoot');
-    topbar.innerHTML = `
-      <div class="title">Schedule — แผนงาน</div>
-      <div class="sub">ทั้งหมด ${state.data.schedule.length} งาน</div>
-      <div class="toolbar">
-        <button class="btn btn-success" id="btnAdd">+ เพิ่มงาน</button>
-        <button class="btn" id="btnExportEx">Export Excel</button>
-        <button class="btn" id="btnExportPDF">Export PDF</button>
-        <button class="btn btn-primary" id="btnSave">💾 บันทึก</button>
-      </div>
-    `;
-    document.getElementById('btnAdd').onclick = () => Forms.openSchedule(null);
-    document.getElementById('btnSave').onclick = () => App.saveAll();
-    document.getElementById('btnExportEx').onclick = () => Exports.exportExcel('schedule', 'Schedule');
-    document.getElementById('btnExportPDF').onclick = () => Exports.exportPDF('schedule', 'Schedule', [
-      { key: 'Task_ID', label: 'ID' },
-      { key: 'DocNo', label: 'DocNo' },
-      { key: 'TaskName', label: 'Task' },
-      { key: 'Assignee', label: 'Assignee' },
-      { key: 'StartDate', label: 'Start', type: 'date' },
-      { key: 'EndDate', label: 'End', type: 'date' },
-      { key: 'Status', label: 'Status' }
-    ]);
-
-    const tasks = state.data.schedule;
-    if (tasks.length === 0) {
-      root.innerHTML = `<div class="panel"><div class="panel-body muted">ยังไม่มีงาน คลิก "+ เพิ่มงาน" เพื่อเริ่ม</div></div>`;
-      return;
-    }
-
-    // Compute date range
-    const allDates = [];
-    for (const t of tasks) {
-      const s = t.StartDate ? new Date(t.StartDate) : null;
-      const e = t.EndDate ? new Date(t.EndDate) : null;
-      if (s) allDates.push(s);
-      if (e) allDates.push(e);
-    }
-    const minD = new Date(Math.min(...allDates.map(d => d.getTime())));
-    const maxD = new Date(Math.max(...allDates.map(d => d.getTime())));
-    minD.setDate(minD.getDate() - 2);
-    maxD.setDate(maxD.getDate() + 2);
-    const totalDays = Math.max(1, Math.round((maxD - minD) / 86400000));
-    const dayPx = 24;
-    const totalWidth = totalDays * dayPx;
-
-    // Day grid header
-    const months = [];
-    let cur = new Date(minD);
-    while (cur <= maxD) {
-      months.push(new Date(cur));
-      cur.setDate(cur.getDate()+1);
-    }
-
-    // Group by DocNo
-    const byDoc = {};
-    for (const t of tasks) {
-      const k = t.DocNo || '— ไม่ระบุ —';
-      (byDoc[k] = byDoc[k] || []).push(t);
-    }
-
-    let html = `
-      <div class="panel">
-        <div class="panel-header">มุมมอง Gantt (โครงสร้างเวลา)</div>
-        <div class="panel-body" style="padding:0;overflow:auto;">
-          <div class="gantt" style="min-width:${totalWidth + 220}px;">
-            <div class="row" style="border-bottom:2px solid var(--border);">
-              <div class="label" style="font-weight:700;">DocNo / งาน</div>
-              <div class="timeline" style="height:32px;width:${totalWidth}px;">
-                ${months.filter((_,i)=>i%7===0).map((d,i) => {
-                  const left = i * 7 * dayPx;
-                  return `<div style="position:absolute;left:${left}px;top:8px;font-size:11px;color:var(--muted);">${fmtDate(d)}</div>`;
-                }).join('')}
-              </div>
-            </div>
-            ${Object.entries(byDoc).map(([doc, arr]) => `
-              <div class="row" style="background:#fafbfc;border-bottom:1px solid var(--border);">
-                <div class="label" style="font-weight:600;">${escapeHTML(doc)}</div>
-                <div class="timeline" style="width:${totalWidth}px;height:8px;"></div>
-              </div>
-              ${arr.map(t => {
-                const s = t.StartDate ? new Date(t.StartDate) : null;
-                const e = t.EndDate ? new Date(t.EndDate) : s;
-                const aS = t.ActualStartDate ? new Date(t.ActualStartDate) : null;
-                const aE = t.ActualEndDate ? new Date(t.ActualEndDate) : null;
-                const left = s ? Math.round((s - minD)/86400000) * dayPx : 0;
-                const width = (s && e) ? Math.max(dayPx, Math.round((e - s)/86400000) * dayPx + dayPx) : dayPx;
-                const aLeft = aS ? Math.round((aS - minD)/86400000) * dayPx : null;
-                const aWidth = (aS && aE) ? Math.max(dayPx, Math.round((aE - aS)/86400000) * dayPx + dayPx) : (aS ? dayPx : 0);
-                const isLate = e && aE && aE > e;
-                const idx = state.data.schedule.indexOf(t);
-                return `
-                  <div class="row" data-idx="${idx}">
-                    <div class="label" style="cursor:pointer;" data-edit-task="${idx}">
-                      <div style="font-weight:500;">${escapeHTML(t.TaskName||'')}</div>
-                      <div class="muted" style="font-size:11px;">${escapeHTML(t.Assignee||'')} · ${escapeHTML(t.Status||'')}</div>
-                    </div>
-                    <div class="timeline" style="width:${totalWidth}px;">
-                      ${s ? `<div class="bar ${isLate?'late':''}" style="left:${left}px;width:${width}px;" title="${escapeHTML((t.TaskName||''))} (${fmtDate(s)} → ${fmtDate(e)})">${escapeHTML(t.TaskName||'')}</div>` : ''}
-                      ${aS ? `<div class="bar actual" style="left:${aLeft}px;width:${aWidth}px;" title="ทำจริง: ${fmtDate(aS)} → ${aE?fmtDate(aE):'-'}"></div>` : ''}
-                    </div>
-                  </div>
-                `;
-              }).join('')}
-            `).join('')}
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-header">ตารางงาน</div>
-        <div class="panel-body" style="padding:0;">
-          <div class="table-wrap" style="border:none;border-radius:0;">
-            <table class="data">
-              <thead><tr>
-                <th>Task ID</th><th>DocNo</th><th>งาน</th><th>ผู้รับผิดชอบ</th>
-                <th>เริ่ม (แผน)</th><th>เสร็จ (แผน)</th>
-                <th>เริ่มจริง</th><th>เสร็จจริง</th>
-                <th>สถานะ</th><th>การกระทำ</th>
-              </tr></thead>
-              <tbody id="scheduleTbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    `;
-    root.innerHTML = html;
-
-    document.querySelectorAll('[data-edit-task]').forEach(el => {
-      el.onclick = () => Forms.openSchedule(parseInt(el.dataset.editTask, 10));
-    });
-
-    const tbody = document.getElementById('scheduleTbody');
-    tbody.innerHTML = tasks.map((t, i) => `
-      <tr>
-        <td>${escapeHTML(t.Task_ID||'')}</td>
-        <td>${escapeHTML(t.DocNo||'')}</td>
-        <td>${escapeHTML(t.TaskName||'')}</td>
-        <td>${escapeHTML(t.Assignee||'')}</td>
-        <td>${fmtDate(t.StartDate)}</td>
-        <td>${fmtDate(t.EndDate)}</td>
-        <td>${fmtDate(t.ActualStartDate)}</td>
-        <td>${fmtDate(t.ActualEndDate)}</td>
-        <td>${renderStatusPill(t.Status)}</td>
-        <td class="actions">
-          <button class="btn btn-sm" data-edit="${i}">แก้ไข</button>
-          <button class="btn btn-sm btn-danger" data-del="${i}">ลบ</button>
-        </td>
-      </tr>
-    `).join('');
-    tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => Forms.openSchedule(parseInt(b.dataset.edit, 10)));
-    tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-      if (await App.confirmDialog('ลบรายการนี้?', { danger: true })) {
-        state.data.schedule.splice(parseInt(b.dataset.del, 10), 1);
-        await App.saveAll();
-        render('schedule');
-      }
-    });
+    ScheduleManager.render();
   }
 
-  // -------------------- COSTS --------------------
-  function costsView() {
-    // additional summary at top
-    const data = state.data.costs;
-    const total = data.reduce((s, r) => s + (Number(r['จำนวนเงินรวม Vat']) || 0), 0);
-    const totalNoVat = data.reduce((s, r) => s + (Number(r['จำนวนเงินรวม']) || 0), 0);
-
-    renderGenericTable({
-      view: 'costs',
-      title: 'Costs — รายการค่าใช้จ่าย',
-      columns: [
-        { key: 'วันที่', label: 'วันที่', type: 'date' },
-        { key: 'เลขที่งาน', label: 'เลขที่งาน' },
-        { key: 'เลขที่โครงการ', label: 'โครงการ' },
-        { key: 'ประเภท', label: 'ประเภท' },
-        { key: 'ผู้ขาย / Sup', label: 'ผู้ขาย/Sup' },
-        { key: 'รายละเอียด', label: 'รายละเอียด', type: 'long' },
-        { key: 'จำนวน', label: 'จำนวน', type: 'number' },
-        { key: 'ราคา / หน่วย', label: 'ราคา/หน่วย', type: 'money' },
-        { key: 'จำนวนเงินรวม', label: 'รวม', type: 'money' },
-        { key: 'VAT', label: 'VAT', type: 'money' },
-        { key: 'จำนวนเงินรวม Vat', label: 'รวม VAT', type: 'money' },
-        { key: 'ผู้บันทึก', label: 'ผู้บันทึก' }
-      ],
-      filterFields: [
-        { key: 'ประเภท', label: 'ประเภท', type: 'select', options: collectUnique('costs', 'ประเภท') },
-        { key: 'เลขที่งาน', label: 'เลขที่งาน', type: 'text', placeholder: 'เช่น SM-2605001-PC' },
-        { key: 'เลขที่โครงการ', label: 'โครงการ', type: 'text' }
-      ],
-      headerExtra: `
-        <div class="status-pill" style="background:#dbeafe;color:#1d4ed8;">รวม: ${fmtMoney(totalNoVat)}</div>
-        <div class="status-pill" style="background:#dcfce7;color:#166534;">รวม VAT: ${fmtMoney(total)}</div>
-      `,
-      onAdd: () => Forms.openCost(null),
-      onEdit: idx => Forms.openCost(idx),
-      onDelete: async idx => {
-        state.data.costs.splice(idx, 1);
-        await App.saveAll();
-        render('costs');
-      }
-    });
-  }
-
-  function collectUnique(view, key) {
-    const set = new Set();
-    for (const r of state.data[view]) {
-      const v = r[key];
-      if (v != null && v !== '') set.add(String(v).trim());
-    }
-    return [...set].sort((a,b) => a.localeCompare(b, 'th'));
-  }
-
-  // -------------------- Dispatch --------------------
+  // -------------------- RETURN --------------------
   function render(view) {
-    state.currentView = view;
-    document.querySelectorAll('.nav-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.view === view);
-    });
-    if (!state.folderHandle) {
-      document.getElementById('topbar').innerHTML = `<div class="title">SMEC Job Database</div>`;
-      document.getElementById('viewRoot').innerHTML = '';
-      document.getElementById('welcome').classList.remove('hidden');
-      return;
+    document.querySelectorAll('.nav-item').forEach(el =>
+      el.classList.toggle('active', el.dataset.view === view));
+    switch (view) {
+      case 'dashboard': dashboard(); break;
+      case 'jobs':      jobsView(); break;
+      case 'delivery':  deliveryView(); break;
+      case 'gatepass':  gatepassView(); break;
+      case 'schedule':  scheduleView(); break;
+      case 'costs':     costsView(); break;
+      default:          dashboard();
     }
-    document.getElementById('welcome').classList.add('hidden');
-    if (view === 'dashboard') return dashboard();
-    if (view === 'jobs') return jobsView();
-    if (view === 'delivery') return deliveryView();
-    if (view === 'gatepass') return gatepassView();
-    if (view === 'schedule') return scheduleView();
-    if (view === 'costs') return costsView();
   }
 
-  return { render, renderGenericTable, renderStatusPill, renderFileLinks, collectUnique };
+  function costsView() {
+    CostsManager.render();
+  }
+
+  return { render, dashboard, jobsView, deliveryView, gatepassView, scheduleView, costsView };
 })();
