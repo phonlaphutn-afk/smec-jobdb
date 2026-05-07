@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SMEC Online — คู่มือตั้งค่า Google Cloud + OAuth</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Sarabun', 'Tahoma', sans-serif;
+    color: #1f2937;
+    background: #f5f7fb;
+    margin: 0;
+    padding: 30px 20px;
+    line-height: 1.7;
+  }
+  .container { max-width: 880px; margin: 0 auto; background: #fff; padding: 40px 50px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+  h1 { font-size: 28px; margin: 0 0 6px; color: #1d4ed8; }
+  .subtitle { color: #6b7280; margin-bottom: 28px; font-size: 15px; }
+  h2 { color: #111827; font-size: 20px; margin-top: 36px; padding-bottom: 6px; border-bottom: 2px solid #e5e7eb; }
+  h3 { color: #1f2937; font-size: 16px; margin-top: 24px; }
+  ol li, ul li { margin-bottom: 8px; }
+  code, .code {
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+    font-size: 13px;
+    color: #be123c;
+    word-break: break-all;
+  }
+  pre {
+    background: #1f2937;
+    color: #f3f4f6;
+    padding: 14px 18px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .step {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    padding: 14px 18px;
+    border-radius: 6px;
+    margin: 12px 0;
+  }
+  .step-num {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    text-align: center;
+    border-radius: 50%;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+  .warning {
+    background: #fef3c7;
+    border-left: 4px solid #d97706;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 12px 0;
+  }
+  .success {
+    background: #dcfce7;
+    border-left: 4px solid #16a34a;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 12px 0;
+  }
+  a { color: #2563eb; text-decoration: none; font-weight: 500; }
+  a:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+  th, td { padding: 8px 12px; border: 1px solid #e5e7eb; text-align: left; }
+  th { background: #f9fafb; font-weight: 600; }
+  .toc {
+    background: #f9fafb;
+    padding: 16px 24px;
+    border-radius: 8px;
+    margin: 20px 0 30px;
+  }
+  .toc ul { margin: 0; padding-left: 20px; }
+  .toc li { margin-bottom: 4px; }
+  .badge { display: inline-block; background: #dbeafe; color: #1d4ed8; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; margin-left: 6px; }
+  .nav { background: #1d4ed8; color: #fff; padding: 16px 24px; border-radius: 8px; text-align: center; margin-top: 30px; }
+  .nav a { color: #fff; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>คู่มือตั้งค่า SMEC Online (Google Sheets + Drive)</h1>
+  <div class="subtitle">ครั้งแรกใช้เวลาประมาณ 10–15 นาที — ต้องตั้ง 3 อย่าง: <b>OAuth Client ID</b>, <b>Spreadsheet ID</b>, และ <b>Drive Folder ID</b></div>
+
+  <div class="toc">
+    <b>หัวข้อ</b>
+    <ul>
+      <li><a href="#part1">ส่วนที่ 1: สร้าง Google Cloud Project + เปิด API</a></li>
+      <li><a href="#part2">ส่วนที่ 2: ตั้งค่า OAuth Consent Screen</a></li>
+      <li><a href="#part3">ส่วนที่ 3: สร้าง OAuth Client ID</a></li>
+      <li><a href="#part4">ส่วนที่ 4: เตรียม Spreadsheet (นำเข้าจาก xlsx)</a></li>
+      <li><a href="#part5">ส่วนที่ 5: สร้าง Drive Folder สำหรับเอกสารแนบ</a></li>
+      <li><a href="#part6">ส่วนที่ 6: แก้ไข config.js + รัน Local Server</a></li>
+      <li><a href="#part7">ส่วนที่ 7: Deploy ขึ้น Online (ถ้าต้องการ)</a></li>
+      <li><a href="#troubleshoot">🔧 Troubleshoot</a></li>
+    </ul>
+  </div>
+
+  <h2 id="part1">ส่วนที่ 1: สร้าง Google Cloud Project + เปิด API</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    เปิด <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> แล้ว Sign in ด้วย Google account ที่จะใช้
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    ที่มุมบนซ้ายข้างคำว่า "Google Cloud" คลิก <b>Select a project</b> → <b>NEW PROJECT</b>
+    <ul>
+      <li>ตั้งชื่อ Project: เช่น <code>SMEC-JobDB</code></li>
+      <li>คลิก <b>CREATE</b></li>
+    </ul>
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    เปิด <b>Google Sheets API</b>:
+    <ul>
+      <li>ไปที่ <a href="https://console.cloud.google.com/apis/library/sheets.googleapis.com" target="_blank">APIs Library — Google Sheets API</a></li>
+      <li>คลิก <b>ENABLE</b></li>
+    </ul>
+  </div>
+
+  <div class="step">
+    <span class="step-num">4</span>
+    เปิด <b>Google Drive API</b>:
+    <ul>
+      <li>ไปที่ <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank">APIs Library — Google Drive API</a></li>
+      <li>คลิก <b>ENABLE</b></li>
+    </ul>
+  </div>
+
+  <h2 id="part2">ส่วนที่ 2: ตั้งค่า OAuth Consent Screen</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    ไปที่ <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank">OAuth consent screen</a>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    เลือก <b>User Type</b>:
+    <ul>
+      <li>ถ้าเป็น account ส่วนตัว (gmail.com) → เลือก <b>External</b></li>
+      <li>ถ้าเป็น Google Workspace ขององค์กร → เลือก <b>Internal</b> (ง่ายกว่า ไม่ต้องผ่าน verification)</li>
+    </ul>
+    คลิก <b>CREATE</b>
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    กรอกข้อมูล App information:
+    <ul>
+      <li><b>App name:</b> SMEC Job Database</li>
+      <li><b>User support email:</b> อีเมลของคุณ</li>
+      <li><b>Developer contact:</b> อีเมลของคุณ</li>
+    </ul>
+    ที่เหลือกด <b>SAVE AND CONTINUE</b> ผ่านไปทุกหน้า
+  </div>
+
+  <div class="step">
+    <span class="step-num">4</span>
+    <b>(เฉพาะ External)</b> หน้า "Test users" — เพิ่มอีเมลของคุณและคนที่จะใช้แอป (ถ้ายังไม่ verify จะอนุญาตเฉพาะ test users เท่านั้น) แล้วกด <b>SAVE AND CONTINUE</b>
+  </div>
+
+  <h2 id="part3">ส่วนที่ 3: สร้าง OAuth Client ID</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    ไปที่ <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Credentials</a> → คลิก <b>+ CREATE CREDENTIALS</b> → <b>OAuth client ID</b>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    <b>Application type:</b> เลือก <b>Web application</b>
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    <b>Name:</b> ใส่อะไรก็ได้ เช่น <code>SMEC Web Client</code>
+  </div>
+
+  <div class="step">
+    <span class="step-num">4</span>
+    <b>Authorized JavaScript origins</b> — สำคัญมาก!
+    <br>กด <b>+ ADD URI</b> แล้วใส่ URL ที่จะรันแอปนี้:
+    <table>
+      <tr><th>กรณีใช้</th><th>ใส่อะไร</th></tr>
+      <tr><td>ทดสอบ Local (ผ่าน start.bat)</td><td><code>http://localhost:8765</code></td></tr>
+      <tr><td>Deploy บน GitHub Pages</td><td><code>https://[username].github.io</code></td></tr>
+      <tr><td>Deploy บน Vercel</td><td><code>https://[your-app].vercel.app</code></td></tr>
+      <tr><td>Domain เอง</td><td><code>https://yourdomain.com</code></td></tr>
+    </table>
+    เพิ่มได้หลายอันถ้าจะใช้หลาย URL
+  </div>
+
+  <div class="step">
+    <span class="step-num">5</span>
+    คลิก <b>CREATE</b> → จะมี popup แสดง <b>Client ID</b>
+    <br><br>
+    <b>คัดลอก Client ID เก็บไว้</b> — จะใช้ใน config.js
+    <br>
+    <span class="code">ตัวอย่าง: 1234567890-abcdefghijk.apps.googleusercontent.com</span>
+  </div>
+
+  <h2 id="part4">ส่วนที่ 4: เตรียม Spreadsheet</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    ไปที่ <a href="https://sheets.google.com/" target="_blank">Google Sheets</a> สร้าง Spreadsheet ใหม่ ตั้งชื่อ <code>SMEC Job Database</code>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    เปิด Spreadsheet นั้น → <b>File → Import</b>
+    <ul>
+      <li>เลือก <b>Upload</b></li>
+      <li>ลาก <code>SMEC_Job_Database.xlsx</code> เข้ามา (จากโฟลเดอร์ <code>D:\Document\SMECDB\</code>)</li>
+      <li><b>Import location:</b> เลือก <b>Replace spreadsheet</b></li>
+      <li>คลิก <b>Import data</b></li>
+    </ul>
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    หลัง Import แล้ว ตรวจสอบว่ามี 5 ชีต: <code>ชีต1</code>, <code>ใบส่งของชั่วคราว</code>, <code>GatePass</code>, <code>Schedule_DB</code>, <code>Costs</code>
+  </div>
+
+  <div class="step">
+    <span class="step-num">4</span>
+    คัดลอก <b>Spreadsheet ID</b> จาก URL ของ Spreadsheet:
+    <pre>https://docs.google.com/spreadsheets/d/<b style="color:#fcd34d">1AbCdEfGhIjKlMnOpQrStUvWxYz0123</b>/edit</pre>
+    ส่วนที่ขีดเส้นเหลืองคือ Spreadsheet ID — เก็บไว้
+  </div>
+
+  <h2 id="part5">ส่วนที่ 5: สร้าง Drive Folder สำหรับเอกสารแนบ</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    ไปที่ <a href="https://drive.google.com/" target="_blank">Google Drive</a> → คลิก <b>+ New</b> → <b>New folder</b> → ตั้งชื่อ <code>SMEC_Attachments</code>
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    ดับเบิลคลิกเข้าโฟลเดอร์ที่เพิ่งสร้าง → คัดลอก <b>Folder ID</b> จาก URL:
+    <pre>https://drive.google.com/drive/folders/<b style="color:#fcd34d">1XyZ9876543abcDeFgHiJkLm</b></pre>
+    ส่วนที่ขีดเส้นเหลืองคือ Folder ID — เก็บไว้
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    <b>(ไม่บังคับ) เก็บ Logo ไว้ใน Drive</b>
+    <ul>
+      <li>อัปโหลด <code>logo.jpg</code> เข้าไปในโฟลเดอร์ <code>SMEC_Attachments</code> นี้</li>
+      <li>คลิกขวาที่ไฟล์ → <b>Get link</b> → คัดลอก URL</li>
+      <li>ส่วน <code>1abc...xyz</code> ใน URL คือ <b>Logo File ID</b></li>
+    </ul>
+    ถ้าไม่ตั้ง ระบบจะแสดง logo เป็น text badge แทน
+  </div>
+
+  <h2 id="part6">ส่วนที่ 6: แก้ไข config.js + รัน Local Server</h2>
+
+  <div class="step">
+    <span class="step-num">1</span>
+    เปิดไฟล์ <code>D:\Document\SMECDB\WebApp-Online\assets\config.js</code> ด้วย Notepad (หรือ VS Code)
+  </div>
+
+  <div class="step">
+    <span class="step-num">2</span>
+    แก้ค่า 3 ตัวให้ตรงกับที่คัดลอกมาในส่วน 3, 4, 5:
+    <pre>const CONFIG = {
+  CLIENT_ID: '1234567890-abc.apps.googleusercontent.com',  // ← จากส่วน 3
+  SPREADSHEET_ID: '1AbCdEfGhIjKlMnOpQrStUvWxYz0123',       // ← จากส่วน 4
+  ATTACHMENTS_FOLDER_ID: '1XyZ9876543abcDeFgHiJkLm',       // ← จากส่วน 5
+  LOGO_FILE_ID: '',  // ← (ไม่บังคับ) จากส่วน 5 ข้อ 3
+  ...
+};</pre>
+    Save ไฟล์
+  </div>
+
+  <div class="step">
+    <span class="step-num">3</span>
+    รัน Local server: ไปที่โฟลเดอร์ <code>WebApp-Online</code> ดับเบิลคลิก <code>start.bat</code>
+    <br>เบราว์เซอร์จะเปิด <code>http://localhost:8765/WebApp-Online/</code>
+  </div>
+
+  <div class="step">
+    <span class="step-num">4</span>
+    คลิก <b>เข้าสู่ระบบ Google</b> ในแถบซ้าย
+    <ul>
+      <li>เลือกบัญชี Google</li>
+      <li>กด <b>Continue</b> เมื่อมีคำเตือน "Google hasn't verified this app" (ถ้าเป็น External + ยังไม่ verify)</li>
+      <li>อนุญาต Sheets + Drive</li>
+    </ul>
+  </div>
+
+  <div class="success">
+    ✅ ถ้าเห็นข้อความ "โหลดข้อมูลสำเร็จ" และมีข้อมูล 5 ชีตขึ้น → เสร็จเรียบร้อย!
+  </div>
+
+  <h2 id="part7">ส่วนที่ 7: Deploy ขึ้น Online (ถ้าต้องการให้คนอื่นเข้าได้)</h2>
+
+  <p>ถ้าใช้ในเครื่องเดียวก็ไม่ต้องทำส่วนนี้ แต่ถ้าจะให้ทีมเข้าจากที่ไหนก็ได้:</p>
+
+  <h3>วิธีที่ 1: GitHub Pages (ฟรี)</h3>
+  <ol>
+    <li>สร้าง GitHub repo ใหม่ <span class="badge">เช่น smec-jobdb</span></li>
+    <li>อัปโหลดทุกไฟล์ในโฟลเดอร์ <code>WebApp-Online</code> เข้า repo</li>
+    <li>ใน Settings → Pages → Source: <code>main</code> branch, root</li>
+    <li>เพิ่ม <code>https://[username].github.io</code> ใน Authorized origins (ส่วนที่ 3 ข้อ 4)</li>
+  </ol>
+
+  <h3>วิธีที่ 2: Vercel (ฟรี + ง่ายมาก)</h3>
+  <ol>
+    <li>เข้า <a href="https://vercel.com/" target="_blank">vercel.com</a> → login ด้วย GitHub</li>
+    <li>Import GitHub repo ที่อัปโหลดในวิธีที่ 1</li>
+    <li>Deploy ได้ URL <code>https://your-app.vercel.app</code></li>
+    <li>เพิ่ม URL นี้ใน Authorized origins</li>
+  </ol>
+
+  <div class="warning">
+    ⚠️ หลัง deploy แล้ว ต้องแก้ <code>Authorized JavaScript origins</code> ใน Google Cloud Console (ส่วนที่ 3 ข้อ 4) ให้รวม URL ใหม่ด้วย — ไม่งั้น OAuth จะ error
+  </div>
+
+  <h2 id="troubleshoot">🔧 Troubleshoot ปัญหาที่พบบ่อย</h2>
+
+  <h3>"Error 400: redirect_uri_mismatch" หรือ "origin_mismatch"</h3>
+  <p>URL ที่เปิดอยู่ไม่ตรงกับ Authorized JavaScript origins ใน Google Cloud Console — กลับไปที่ส่วน 3 ข้อ 4 เพิ่ม URL ปัจจุบันให้ตรงเป๊ะ (รวม port)</p>
+
+  <h3>"Access blocked: This app's request is invalid"</h3>
+  <p>ยังไม่ได้เปิด Sheets API หรือ Drive API — กลับไปทำส่วน 1 ข้อ 3-4</p>
+
+  <h3>"Google hasn't verified this app"</h3>
+  <p>ปกติถ้าเป็น External + Test users — กด <b>Advanced</b> → <b>Go to SMEC Job Database (unsafe)</b> ก็ใช้ได้ ถ้าจะเอาออก verification ต้องส่งให้ Google review (ใช้เวลาเป็นเดือน)</p>
+
+  <h3>"Permission denied" หลัง sign-in</h3>
+  <p>อีเมลที่ใช้ sign-in ยังไม่ได้เพิ่มใน Test users — ส่วน 2 ข้อ 4</p>
+
+  <h3>โหลดข้อมูลไม่ขึ้น แต่ sign-in สำเร็จ</h3>
+  <p>SPREADSHEET_ID ผิด หรือ Spreadsheet ไม่ได้อยู่ใน account ที่ sign-in</p>
+
+  <h3>อัปโหลดเอกสารแนบไม่ได้</h3>
+  <p>ATTACHMENTS_FOLDER_ID ผิด หรือ folder ไม่ได้อยู่ใน account ที่ sign-in</p>
+
+  <div class="nav">
+    <a href="index.html">← กลับไปที่ Web App</a>
+  </div>
+</div>
+</body>
+</html>

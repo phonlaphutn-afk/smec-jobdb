@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SMEC Job Database (Online)</title>
+<link rel="stylesheet" href="assets/style.css" />
+<!-- SheetJS (used for Excel export of filtered data) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Google APIs -->
+<script src="https://apis.google.com/js/api.js"></script>
+<script src="https://accounts.google.com/gsi/client"></script>
+</head>
+<body>
+<div id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">SMEC</div>
+      <div class="brand-text">
+        <div class="brand-title">Job Database</div>
+        <div class="brand-sub">Local Workspace</div>
+      </div>
+    </div>
+
+    <div class="folder-status">
+      <div id="folderName" class="folder-name">ยังไม่ได้เข้าสู่ระบบ</div>
+      <button id="btnPickFolder" class="btn btn-primary btn-block">เข้าสู่ระบบ Google</button>
+      <button id="btnReload" class="btn btn-ghost btn-block" disabled>โหลดข้อมูลใหม่</button>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-view="dashboard">
+        <span class="nav-icon">🏠</span><span>หน้าแรก / Dashboard</span>
+      </button>
+      <button class="nav-item" data-view="jobs">
+        <span class="nav-icon">📋</span><span>ใบงาน (Jobs)</span>
+      </button>
+      <button class="nav-item" data-view="delivery">
+        <span class="nav-icon">📦</span><span>ใบส่งของชั่วคราว</span>
+      </button>
+      <button class="nav-item" data-view="gatepass">
+        <span class="nav-icon">🚚</span><span>GatePass</span>
+      </button>
+      <button class="nav-item" data-view="schedule">
+        <span class="nav-icon">📅</span><span>Schedule</span>
+      </button>
+      <button class="nav-item" data-view="costs">
+        <span class="nav-icon">💰</span><span>Costs</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="status-pill" id="saveStatus">พร้อมใช้งาน</div>
+      <div class="hint">ข้อมูลทั้งหมดอยู่ในโฟลเดอร์ที่คุณเลือก</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Top toolbar (per-view) -->
+    <div id="topbar" class="topbar"></div>
+
+    <!-- Welcome / sign-in screen -->
+    <section id="welcome" class="welcome hidden">
+      <div class="welcome-card">
+        <h1>ยินดีต้อนรับสู่ SMEC Job Database <small style="color:#2563eb;font-size:0.5em;font-weight:400;">(Online)</small></h1>
+        <p>เวอร์ชันนี้บันทึกข้อมูลบน Google Sheets + Google Drive — ทำงานได้ทุกอุปกรณ์ หลายคนพร้อมกัน</p>
+        <ul class="welcome-steps">
+          <li>คลิก <b>เข้าสู่ระบบ Google</b> ที่แถบด้านซ้าย</li>
+          <li>อนุญาตให้แอปเข้าถึง Google Sheets และ Google Drive (เฉพาะไฟล์ที่แอปสร้าง)</li>
+          <li>ระบบจะโหลดข้อมูลจาก Spreadsheet ที่ตั้งไว้ และเตรียมโฟลเดอร์เอกสารแนบให้</li>
+        </ul>
+        <p class="warn">⚠️ ครั้งแรก ต้องตั้งค่า OAuth Client ID ใน <code>assets/config.js</code> ก่อน — <a href="setup-guide.html" target="_blank">ดูคู่มือตั้งค่า</a></p>
+      </div>
+    </section>
+
+    <!-- View container -->
+    <section id="viewRoot" class="view-root"></section>
+  </main>
+</div>
+
+<!-- Modal -->
+<div id="modal" class="modal hidden" aria-hidden="true">
+  <div class="modal-backdrop" data-close="1"></div>
+  <div class="modal-dialog" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <h3 id="modalTitle">หัวข้อ</h3>
+      <button class="modal-close" data-close="1" aria-label="ปิด">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter">
+      <button class="btn btn-ghost" data-close="1">ยกเลิก</button>
+      <button class="btn btn-primary" id="modalConfirm">บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- Online stack: config + auth + APIs -->
+<script src="assets/logo-data.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/google-auth.js"></script>
+<script src="assets/sheets-api.js"></script>
+<script src="assets/drive-api.js"></script>
+<!-- Core app + UI (shared) -->
+<script src="assets/app.js"></script>
+<script src="assets/print.js"></script>
+<script src="assets/views.js"></script>
+<script src="assets/forms.js"></script>
+<script src="assets/exports.js"></script>
+<script src="assets/main.js"></script>
+</body>
+</html>
