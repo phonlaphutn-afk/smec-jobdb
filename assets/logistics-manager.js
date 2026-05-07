@@ -1272,6 +1272,12 @@ const LogisticsManager = (() => {
     renderGatePass,
     renderHistory,
     initDelivery: ()=>{ _do=_initDO(); _doItems=_defaultItems(); _doRef=null; },
-    initGatePass: ()=>{ _gp=_initGP(); }
+    initGatePass: ()=>{ _gp=_initGP(); },
+    // Navigate to delivery page with job pre-selected
+    deliveryFromJob(job) {
+      _do = _initDO(); _do.doNo = _genDO(); _doRef = null; _doItems = _defaultItems();
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === 'delivery'));
+      _selectJob(job); // _selectJob calls renderDelivery() internally
+    }
   };
 })();

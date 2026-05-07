@@ -194,29 +194,92 @@ const Views = (() => {
     return `<span class="pill ${cls}">${escapeHTML(t)}</span>`;
   }
 
+  /* ---- Attachment preview tooltip (hover) ---- */
+  (function _initAttachPreview() {
+    const tip = document.createElement('div');
+    tip.id = 'attachTip';
+    tip.style.cssText = 'position:fixed;z-index:9999;display:none;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:8px;max-width:320px;pointer-events:none;';
+    document.body.appendChild(tip);
+
+    function _driveThumb(url) {
+      // lh3.googleusercontent.com/d/FILE_ID
+      let m = url.match(/lh3\.googleusercontent\.com\/d\/([\w-]+)/);
+      if (m) return `https://lh3.googleusercontent.com/d/${m[1]}=w300`;
+      // drive.google.com/file/d/FILE_ID/...
+      m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+      if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w300`;
+      // drive.google.com/open?id=FILE_ID  or  uc?id=FILE_ID
+      m = url.match(/[?&]id=([\w-]+)/);
+      if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w300`;
+      return null;
+    }
+
+    function _driveViewUrl(url) {
+      const m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+      if (m) return `https://drive.google.com/file/d/${m[1]}/view`;
+      const m2 = url.match(/[?&]id=([\w-]+)/);
+      if (m2) return `https://drive.google.com/file/d/${m2[1]}/view`;
+      return url;
+    }
+
+    const isImg = url => /\.(png|jpg|jpeg|gif|webp|svg|bmp)/i.test(url) || /lh3\.googleusercontent|thumbnail/i.test(url);
+
+    document.addEventListener('mouseover', ev => {
+      const a = ev.target.closest('.file-link[data-preview]');
+      if (!a) { tip.style.display = 'none'; return; }
+      const prev = a.dataset.preview;
+      if (!prev) { tip.style.display = 'none'; return; }
+      const thumb = _driveThumb(prev) || (isImg(prev) ? prev : null);
+      const fname = a.dataset.fname || a.textContent.replace(/^[📎🔗]\s*/,'');
+      tip.innerHTML = thumb
+        ? `<img src="${thumb}" style="width:280px;max-height:200px;object-fit:contain;border-radius:6px;display:block;" onerror="this.parentNode.innerHTML='<div style=\\'padding:12px;font-size:12px;color:#6b7280;\\'>📄 '+decodeURIComponent('${encodeURIComponent(fname)}')+'</div>'">`
+        : `<div style="padding:12px 14px;font-size:13px;font-weight:700;color:#374151;">📄 ${escapeHTML(fname)}</div>`;
+      const r = ev.target.getBoundingClientRect();
+      tip.style.display = 'block';
+      tip.style.left = Math.min(r.left, window.innerWidth - 340) + 'px';
+      tip.style.top  = (r.bottom + 6) + 'px';
+    });
+    document.addEventListener('mouseout', ev => {
+      if (!ev.target.closest('.file-link[data-preview]')) tip.style.display = 'none';
+    });
+    document.addEventListener('mousemove', ev => {
+      if (tip.style.display === 'none') return;
+      if (!ev.target.closest('.file-link[data-preview]')) tip.style.display = 'none';
+    });
+  })();
+
   function renderFileLinks(v) {
     if (!v) return '';
     const items = String(v).split(/[\n,]/).map(s => s.trim()).filter(Boolean);
-    return items.map(p => {
+    return items.map((p, i) => {
       if (/^https?:/i.test(p)) {
-        return `<a href="${escapeHTML(p)}" target="_blank" class="file-link">🔗 ลิงก์</a>`;
+        const viewUrl = p.replace(/\/uc\?export=download/, '/uc?export=view')
+                         .replace(/drive\.google\.com\/file\/d\/([\w-]+)\/.*/, 'drive.google.com/file/d/$1/view');
+        return `<a href="${escapeHTML(viewUrl)}" target="_blank" rel="noreferrer" class="file-link" data-preview="${escapeHTML(p)}" data-fname="ลิงก์ ${i+1}">🔗 ลิงก์ ${i+1}</a>`;
       }
-      let displayName;
+      let displayName, fileId;
       if (p.startsWith('drive:')) {
         const m = p.substring(6).split('|');
-        displayName = m[1] || m[0];
+        fileId = m[0]; displayName = m[1] || m[0];
       } else {
         displayName = p.split('/').pop();
       }
-      return `<a href="#" data-attach="${escapeHTML(p)}" class="file-link">📎 ${escapeHTML(displayName)}</a>`;
+      const prevUrl = fileId ? `https://drive.google.com/thumbnail?id=${fileId}&sz=w300` : '';
+      return `<a href="#" data-attach="${escapeHTML(p)}" class="file-link" data-preview="${escapeHTML(prevUrl || p)}" data-fname="${escapeHTML(displayName)}">📎 ${escapeHTML(displayName)}</a>`;
     }).join(' ');
   }
 
-  // Delegate clicks for attachment links (open via FileHandle)
+  // Delegate clicks for attachment links (open via FileHandle or Drive view)
   document.addEventListener('click', async (ev) => {
     const a = ev.target.closest('[data-attach]');
     if (!a) return;
     ev.preventDefault();
+    if (a.dataset.attach.startsWith('drive:')) {
+      const parts = a.dataset.attach.substring(6).split('|');
+      const fileId = parts[0];
+      window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
+      return;
+    }
     const url = await App.getAttachmentURL(a.dataset.attach);
     if (url) window.open(url, '_blank');
     else App.toast('ไม่พบไฟล์แนบ', 'error');
@@ -572,19 +635,36 @@ const Views = (() => {
     if (existing) existing.destroy();
 
     if (mode === 'year') {
+      const now = new Date();
+      const curYr = now.getFullYear();
+      const curMo = now.getMonth(); // 0-indexed
       const years = Object.keys(yearMonthData).map(Number).sort();
       new Chart(canvas, {
         type: 'line',
         data: {
           labels: MONTHS_TH,
-          datasets: years.map((yr, i) => ({
-            label: `ปี ${yr + 543}`,
-            data: yearMonthData[yr],
-            borderColor: LINE_COLORS[i % LINE_COLORS.length],
-            backgroundColor: 'transparent',
-            tension: 0.4, pointRadius: 4, borderWidth: 2.5,
-            pointBackgroundColor: LINE_COLORS[i % LINE_COLORS.length]
-          }))
+          datasets: years.map((yr, i) => {
+            const raw = yearMonthData[yr];
+            const data = raw.map((v, mo) => {
+              // Future months of current year → null
+              if (yr === curYr && mo > curMo) return null;
+              // Leading zeros of any year → null (no data yet)
+              return v === 0 ? null : v;
+            });
+            // Restore actual zeros that are between real data points (not leading/trailing)
+            let first = data.findIndex(v => v !== null);
+            let last  = data.length - 1 - [...data].reverse().findIndex(v => v !== null);
+            for (let m = first; m <= last; m++) if (data[m] === null && raw[m] === 0) data[m] = 0;
+            return {
+              label: `ปี ${yr + 543}`,
+              data,
+              borderColor: LINE_COLORS[i % LINE_COLORS.length],
+              backgroundColor: 'transparent',
+              tension: 0.4, pointRadius: 4, borderWidth: 2.5,
+              pointBackgroundColor: LINE_COLORS[i % LINE_COLORS.length],
+              spanGaps: false
+            };
+          })
         },
         options: {
           responsive: true, maintainAspectRatio: false,

@@ -778,5 +778,15 @@ const ScheduleManager = (() => {
     _wireInputs();
   }
 
-  return { render: _render };
+  return {
+    render: _render,
+    // Navigate to schedule page with a specific job pre-selected in sidebar
+    openForJob(docNo) {
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === 'schedule'));
+      _sel = docNo || null;
+      _tasks = _sel ? JSON.parse(JSON.stringify(_tasksOf(_sel))) : [];
+      _dirty = false;
+      _render();
+    }
+  };
 })();

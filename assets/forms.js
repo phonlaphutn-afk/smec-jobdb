@@ -770,35 +770,30 @@ const Forms = (() => {
     });
   }
 
-  // ── Create Delivery from Job ──────────────────────────────────────────
+  // ── Navigate to Delivery page with job pre-selected ──────────────────
   function createDeliveryFromJob(jobIdx) {
-    const job = state.data.jobs[jobIdx] || {};
-    openDelivery(null, {
-      'ประเภท': 'ใบส่งของ (อ้างอิงงานระบบ)',
-      'บริษัท': job['บริษัท'] || '',
-      'PO': job['PO'] || '',
-      'รายละเอียด/อ้างอิง': `อ้างอิงใบงานระบบเลขที่: ${job['เลขที่'] || ''}`,
-      'รายการสินค้า': job['รายการย่อย'] || job['รายละเอียด'] || ''
-    });
+    const job = state.data.jobs[jobIdx];
+    if (!job) return;
+    App.closeModal();
+    LogisticsManager.deliveryFromJob(job);
   }
 
-  // ── Create Schedule from Job ──────────────────────────────────────────
+  // ── Navigate to Schedule page with job pre-selected in sidebar ────────
   function createScheduleFromJob(jobIdx) {
-    const job = state.data.jobs[jobIdx] || {};
-    openSchedule(null, {
-      'DocNo': job['เลขที่'] || '',
-      'TaskName': job['รายละเอียด'] || job['ชื่อโครงการ'] || '',
-      'Assignee': job['ผู้รับผิดชอบ'] || ''
-    });
+    const job = state.data.jobs[jobIdx];
+    if (!job) return;
+    App.closeModal();
+    ScheduleManager.openForJob(String(job['เลขที่'] || '').trim());
   }
 
-  // ── Create Cost from Job ──────────────────────────────────────────────
+  // ── Navigate to Costs page ────────────────────────────────────────────
   function createCostFromJob(jobIdx) {
-    const job = state.data.jobs[jobIdx] || {};
-    openCost(null, {
-      'เลขที่งาน': job['เลขที่'] || '',
-      'เลขที่โครงการ': job['เลขที่โครงการ'] || ''
-    });
+    const job = state.data.jobs[jobIdx];
+    if (!job) return;
+    App.closeModal();
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === 'costs'));
+    CostsManager.render();
+    App.toast(`เปิดหน้าต้นทุน — อ้างอิงใบงาน ${job['เลขที่'] || ''}`, 'info');
   }
 
   // -------------------- helpers --------------------
