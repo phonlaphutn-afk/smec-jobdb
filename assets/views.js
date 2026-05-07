@@ -84,7 +84,7 @@ const Views = (() => {
         const sort = state.sort[view];
         const arrow = sort && sort.key === c.key ? (sort.dir === 'desc' ? '▼' : '▲') : '';
         return `<th data-key="${escapeHTML(c.key)}" style="${c.width ? 'min-width:' + c.width : ''}">${escapeHTML(c.label)}<span class="sort-arrow">${arrow}</span></th>`;
-      }).join('') + '<th style="min-width:140px">การกระทำ</th>';
+      }).join('') + `<th style="min-width:${cfg.actionColWidth || '140px'}">การกระทำ</th>`;
       tr.querySelectorAll('th[data-key]').forEach(th => {
         th.onclick = () => {
           const key = th.dataset.key;
@@ -137,6 +137,11 @@ const Views = (() => {
             const btn = tr.querySelector(`[data-x="${a.id}"]`);
             if (btn) btn.onclick = () => a.handler(idx, state.data[view][idx]);
           });
+          if (cfg.onRowDetail) {
+            tr.querySelectorAll('.detail-link').forEach(el => {
+              el.onclick = e => { e.stopPropagation(); cfg.onRowDetail(idx); };
+            });
+          }
         });
       }
 
@@ -168,6 +173,9 @@ const Views = (() => {
       } else if (c.type === 'long') {
         cls = 'wrap';
         v = escapeHTML(v);
+      } else if (c.type === 'detail') {
+        cls = 'wrap';
+        v = v ? `<span class="detail-link" style="cursor:pointer;color:#2563eb;text-decoration:underline dotted;" title="คลิกเพื่อดูรายละเอียดเต็ม">${escapeHTML(v)}</span>` : '';
       } else {
         v = escapeHTML(v);
       }
@@ -238,7 +246,7 @@ const Views = (() => {
     const costs = state.data.costs;
     const today = new Date(); today.setHours(0,0,0,0);
 
-    // ---- Stats calculations ----
+    // ---- Stats ----
     const statusCount = {};
     for (const j of jobs) {
       const s = (j['สถานะ'] || '').toString().trim() || 'ไม่ระบุ';
@@ -255,10 +263,20 @@ const Views = (() => {
       assigneeCount[a] = (assigneeCount[a] || 0) + 1;
     }
 
-    // Monthly trend (last 12 months)
-    const monthlyMap = {};
+    // Year-month breakdown (for multi-line year trend)
+    const yearMonthData = {};
+    for (const j of jobs) {
+      const d = j['วันที่'] instanceof Date ? j['วันที่'] : (j['วันที่'] ? new Date(j['วันที่']) : null);
+      if (!d || isNaN(d.getTime())) continue;
+      const yr = d.getFullYear(); const mo = d.getMonth();
+      if (!yearMonthData[yr]) yearMonthData[yr] = new Array(12).fill(0);
+      yearMonthData[yr][mo]++;
+    }
+
+    // Monthly trend last 24 months
     const now = new Date();
-    for (let i = 11; i >= 0; i--) {
+    const monthlyMap = {};
+    for (let i = 23; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       monthlyMap[key] = 0;
@@ -270,36 +288,23 @@ const Views = (() => {
       if (key in monthlyMap) monthlyMap[key]++;
     }
 
-    // Outstanding = jobs ที่ยังไม่เสร็จ
-    const outstanding = jobs.filter(j => {
-      const s = (j['สถานะ'] || '').toString().trim();
-      return !/เสร็จ|ส่งงานแล้ว|completed|close/i.test(s);
-    });
-
-    // Overdue schedule tasks
+    const outstanding = jobs.filter(j => !/เสร็จ|ส่งงานแล้ว|completed|close/i.test((j['สถานะ']||'').toString().trim()));
     const overdue = sched.filter(t => {
       if (!t.EndDate) return false;
       const ed = t.EndDate instanceof Date ? t.EndDate : new Date(t.EndDate);
       return ed < today && !/เสร็จ|สำเร็จ|complete/i.test((t.Status||'').trim());
     });
-
-    const totalCostsVat = costs.reduce((s, r) => s + (Number(r['จำนวนเงินรวม Vat']) || 0), 0);
-    const totalCostsNoVat = costs.reduce((s, r) => s + (Number(r['จำนวนเงินรวม']) || 0), 0);
-
-    // Recent jobs sorted by date
+    const totalCostsVat    = costs.reduce((s,r) => s + (Number(r['จำนวนเงินรวม Vat'])||0), 0);
+    const totalCostsNoVat  = costs.reduce((s,r) => s + (Number(r['จำนวนเงินรวม'])||0), 0);
     const recentJobs = [...jobs].sort((a,b) => {
-      const da = (a['วันที่ลงบันทึก']||a['วันที่']); const db_ = (b['วันที่ลงบันทึก']||b['วันที่']);
-      const ta = da instanceof Date ? da.getTime() : new Date(da||0).getTime();
-      const tb = db_ instanceof Date ? db_.getTime() : new Date(db_||0).getTime();
+      const ta = new Date((a['วันที่ลงบันทึก']||a['วันที่'])||0).getTime();
+      const tb = new Date((b['วันที่ลงบันทึก']||b['วันที่'])||0).getTime();
       return tb - ta;
     }).slice(0, 10);
-
     const lastJob = recentJobs[0] || null;
-
-    // Top 5 assignees
     const topAssignees = Object.entries(assigneeCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
-    // ---- Render topbar ----
+    // ---- Topbar ----
     topbar.innerHTML = `
       <div class="title">หน้าแรก / Dashboard</div>
       <div class="sub">${state.folderName ? escapeHTML(state.folderName) : ''}</div>
@@ -311,112 +316,127 @@ const Views = (() => {
     document.getElementById('btnSaveAll').onclick = () => App.saveAll();
     document.getElementById('btnQuickAdd2').onclick = () => Forms.openJob(null);
 
-    // ---- Render HTML ----
+    // ---- HTML ----
     root.innerHTML = `
       <!-- Quick actions -->
-      <div class="panel" style="border-top:3px solid var(--primary);margin-bottom:16px;">
-        <div class="panel-body" style="display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;">
-          <button class="btn btn-success" id="btnQuickAdd" style="font-size:14px;padding:10px 20px;">➕ บันทึกงานใหม่</button>
-          <button class="btn btn-primary" id="btnPrintLast" ${lastJob?'':'disabled'} style="font-size:14px;padding:10px 20px;">
-            🖨 พิมพ์ใบล่าสุด ${lastJob ? '('+escapeHTML(lastJob['เลขที่']||'')+')' : ''}
-          </button>
-          <button class="btn" id="btnGoJobsAll" style="font-size:14px;padding:10px 18px;">📋 ใบงานทั้งหมด</button>
-          <button class="btn" id="btnGoOutstanding" style="font-size:14px;padding:10px 18px;">⏳ งานค้าง (${outstanding.length})</button>
-        </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+        <button class="btn btn-success" id="btnQuickAdd" style="font-size:14px;padding:9px 20px;border-radius:8px;font-weight:600;">➕ บันทึกงานใหม่</button>
+        <button class="btn btn-primary" id="btnPrintLast" ${lastJob?'':'disabled'} style="font-size:14px;padding:9px 20px;border-radius:8px;">
+          🖨 พิมพ์ใบล่าสุด ${lastJob ? '('+escapeHTML(lastJob['เลขที่']||'')+')' : ''}
+        </button>
+        <button class="btn" id="btnGoJobsAll" style="font-size:14px;padding:9px 20px;border-radius:8px;">📋 ใบงานทั้งหมด</button>
+        <button class="btn ${outstanding.length>0?'btn-warning':''}" id="btnGoOutstanding" style="font-size:14px;padding:9px 20px;border-radius:8px;">
+          ⏳ งานค้าง (${outstanding.length})
+        </button>
       </div>
 
-      <!-- Stats cards -->
-      <div class="stats-grid" style="margin-bottom:16px;">
-        <div class="stat-card primary">
-          <div class="label">ใบงานทั้งหมด</div>
+      <!-- Stat cards -->
+      <div class="stats-grid" style="margin-bottom:20px;">
+        <div class="stat-card primary" style="cursor:pointer;" id="scJobsAll">
+          <div class="label">📋 ใบงานทั้งหมด</div>
           <div class="value">${jobs.length.toLocaleString()}</div>
-          <div class="delta">รายการ</div>
+          <div class="delta">รายการในระบบ</div>
         </div>
-        <div class="stat-card warning">
-          <div class="label">งานค้าง / ยังไม่เสร็จ</div>
+        <div class="stat-card warning" style="cursor:pointer;" id="scOutstanding">
+          <div class="label">⏳ งานค้าง / ยังไม่เสร็จ</div>
           <div class="value">${outstanding.length.toLocaleString()}</div>
           <div class="delta">${jobs.length ? Math.round(outstanding.length/jobs.length*100) : 0}% ของทั้งหมด</div>
         </div>
         <div class="stat-card success">
-          <div class="label">ใบส่งของ / GatePass</div>
+          <div class="label">📦 ใบส่งของ / GatePass</div>
           <div class="value">${delivery.length + gp.length}</div>
           <div class="delta">${delivery.length} ใบส่งของ · ${gp.length} gatepass</div>
         </div>
-        <div class="stat-card primary">
-          <div class="label">งาน Schedule เลยกำหนด</div>
-          <div class="value" style="color:${overdue.length>0?'var(--danger)':'inherit'}">${overdue.length}</div>
-          <div class="delta">${sched.length} งานทั้งหมด</div>
+        <div class="stat-card ${overdue.length>0?'danger':'primary'}" style="cursor:${overdue.length>0?'pointer':'default'};" id="scOverdue">
+          <div class="label">⚠️ Schedule เลยกำหนด</div>
+          <div class="value">${overdue.length}</div>
+          <div class="delta">${sched.length} งาน schedule ทั้งหมด</div>
         </div>
         <div class="stat-card success">
-          <div class="label">ยอดค่าใช้จ่าย (ไม่รวม VAT)</div>
-          <div class="value" style="font-size:1.1rem;">${fmtMoney(totalCostsNoVat)}</div>
+          <div class="label">💰 ค่าใช้จ่าย (ไม่รวม VAT)</div>
+          <div class="value" style="font-size:1.05rem;">${fmtMoney(totalCostsNoVat)}</div>
           <div class="delta">บาท</div>
         </div>
         <div class="stat-card warning">
-          <div class="label">ยอดค่าใช้จ่าย (รวม VAT)</div>
-          <div class="value" style="font-size:1.1rem;">${fmtMoney(totalCostsVat)}</div>
+          <div class="label">💳 ค่าใช้จ่าย (รวม VAT)</div>
+          <div class="value" style="font-size:1.05rem;">${fmtMoney(totalCostsVat)}</div>
           <div class="delta">${costs.length} รายการ</div>
         </div>
       </div>
 
       <!-- Charts row -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;" id="chartsRow">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:0;" id="chartsRow">
         <div class="panel" style="margin:0;">
-          <div class="panel-header">สถานะใบงาน</div>
-          <div class="panel-body" style="padding:12px;height:220px;display:flex;align-items:center;justify-content:center;">
+          <div class="panel-header" style="font-size:13px;font-weight:600;">สถานะใบงาน <span style="font-size:11px;color:#9ca3af;font-weight:400;">(คลิกดูรายการ)</span></div>
+          <div class="panel-body" style="padding:12px;height:230px;display:flex;align-items:center;justify-content:center;">
             <canvas id="chartStatus"></canvas>
           </div>
         </div>
         <div class="panel" style="margin:0;">
-          <div class="panel-header">ประเภทงาน</div>
-          <div class="panel-body" style="padding:12px;height:220px;display:flex;align-items:center;justify-content:center;">
+          <div class="panel-header" style="font-size:13px;font-weight:600;">ประเภทงาน <span style="font-size:11px;color:#9ca3af;font-weight:400;">(คลิกดูรายการ)</span></div>
+          <div class="panel-body" style="padding:12px;height:230px;display:flex;align-items:center;justify-content:center;">
             <canvas id="chartType"></canvas>
           </div>
         </div>
         <div class="panel" style="margin:0;">
-          <div class="panel-header">ผู้รับผิดชอบ (Top 5)</div>
-          <div class="panel-body" style="padding:12px;height:220px;display:flex;align-items:center;justify-content:center;">
+          <div class="panel-header" style="font-size:13px;font-weight:600;">ผู้รับผิดชอบ (Top 5) <span style="font-size:11px;color:#9ca3af;font-weight:400;">(คลิกดูรายการ)</span></div>
+          <div class="panel-body" style="padding:12px;height:230px;display:flex;align-items:center;justify-content:center;">
             <canvas id="chartAssignee"></canvas>
           </div>
         </div>
       </div>
 
-      <!-- Monthly trend chart -->
-      <div class="panel" style="margin-bottom:16px;">
-        <div class="panel-header">จำนวนงานใหม่รายเดือน (12 เดือนล่าสุด)</div>
-        <div class="panel-body" style="padding:12px;height:180px;">
-          <canvas id="chartMonthly"></canvas>
+      <!-- Chart detail panel (filtered jobs on click) -->
+      <div id="chartDetailPanel" style="display:none;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px 16px;margin:12px 0 4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <strong id="chartDetailTitle" style="font-size:14px;color:#0c4a6e;"></strong>
+          <button class="btn btn-sm btn-ghost" id="btnCloseDetail">✕ ปิด</button>
+        </div>
+        <div id="chartDetailBody"></div>
+      </div>
+
+      <!-- Trend chart with year/month toggle -->
+      <div class="panel" style="margin-bottom:16px;margin-top:16px;">
+        <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <span style="font-size:13px;font-weight:600;">📈 จำนวนงานใหม่</span>
+          <div style="display:flex;gap:4px;background:#f1f5f9;padding:3px;border-radius:8px;">
+            <button class="trend-toggle" data-mode="month" style="padding:4px 14px;font-size:12px;border-radius:6px;border:none;cursor:pointer;transition:all .15s;">รายเดือน</button>
+            <button class="trend-toggle" data-mode="year" style="padding:4px 14px;font-size:12px;border-radius:6px;border:none;cursor:pointer;transition:all .15s;">รายปี</button>
+          </div>
+        </div>
+        <div class="panel-body" style="padding:12px 16px;height:200px;">
+          <canvas id="chartTrend"></canvas>
         </div>
       </div>
 
       <!-- Outstanding jobs -->
       <div class="panel" style="margin-bottom:16px;" id="outstandingPanel">
-        <div class="panel-header">
-          ⏳ งานค้าง / ยังไม่เสร็จ (${outstanding.length} รายการ)
-          <span class="right"><button class="btn btn-sm" id="btnGoJobs">ดูใบงานทั้งหมด</button></span>
+        <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>⏳ งานค้าง <span style="color:#f59e0b;font-weight:700;">${outstanding.length}</span> รายการ</span>
+          <button class="btn btn-sm" id="btnGoJobs">ดูใบงานทั้งหมด →</button>
         </div>
         <div class="panel-body" style="padding:0;">
-          <div class="table-wrap" style="border:none;border-radius:0;max-height:300px;">
+          <div class="table-wrap" style="border:none;border-radius:0;max-height:280px;">
             <table class="data">
               <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th><th></th></tr></thead>
               <tbody>
                 ${outstanding.length === 0
-                  ? '<tr><td colspan="6" class="muted" style="text-align:center;padding:30px;">✅ ไม่มีงานค้าง</td></tr>'
+                  ? '<tr><td colspan="6" class="muted" style="text-align:center;padding:30px;">✅ ไม่มีงานค้าง ยอดเยี่ยม!</td></tr>'
                   : outstanding.slice(0, 20).map(j => {
-                      const idx = state.data.jobs.indexOf(j);
+                      const jidx = state.data.jobs.indexOf(j);
                       return `<tr>
-                        <td>${fmtDate(j['วันที่'])}</td>
-                        <td>${escapeHTML(j['เลขที่']||'')}</td>
+                        <td style="white-space:nowrap;">${fmtDate(j['วันที่'])}</td>
+                        <td style="white-space:nowrap;">${escapeHTML(j['เลขที่']||'')}</td>
                         <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0,100))}${(j['รายละเอียด']||'').toString().length>100?'…':''}</td>
                         <td>${escapeHTML(j['ผู้รับผิดชอบ']||'')}</td>
                         <td>${renderStatusPill(j['สถานะ'])}</td>
-                        <td class="actions">
-                          <button class="btn btn-sm" data-editjob="${idx}">แก้ไข</button>
-                          <button class="btn btn-sm btn-primary" data-printjob="${idx}">🖨</button>
+                        <td class="actions" style="white-space:nowrap;">
+                          <button class="btn btn-sm" data-editjob="${jidx}">แก้ไข</button>
+                          <button class="btn btn-sm btn-primary" data-printjob="${jidx}">🖨</button>
                         </td>
                       </tr>`;
                     }).join('')}
-                ${outstanding.length > 20 ? `<tr><td colspan="6" class="muted" style="text-align:center;padding:10px;">และอีก ${outstanding.length - 20} รายการ...</td></tr>` : ''}
+                ${outstanding.length > 20 ? `<tr><td colspan="6" class="muted" style="text-align:center;padding:10px;">และอีก ${outstanding.length-20} รายการ...</td></tr>` : ''}
               </tbody>
             </table>
           </div>
@@ -424,21 +444,25 @@ const Views = (() => {
       </div>
 
       <!-- Recent jobs -->
-      <div class="panel">
-        <div class="panel-header">งานล่าสุด (10 รายการ)</div>
+      <div class="panel" style="margin-bottom:16px;">
+        <div class="panel-header">🕐 งานล่าสุด (10 รายการ)</div>
         <div class="panel-body" style="padding:0;">
-          <div class="table-wrap" style="border:none;border-radius:0;max-height:300px;">
+          <div class="table-wrap" style="border:none;border-radius:0;max-height:280px;">
             <table class="data">
-              <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th></tr></thead>
+              <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th><th></th></tr></thead>
               <tbody>
-                ${recentJobs.length === 0 ? '<tr><td colspan="5" class="muted" style="text-align:center;padding:30px;">ไม่มีข้อมูล</td></tr>' :
-                  recentJobs.map(j => `<tr>
-                    <td>${fmtDate(j['วันที่'])}</td>
-                    <td>${escapeHTML(j['เลขที่']||'')}</td>
-                    <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0,100))}${(j['รายละเอียด']||'').toString().length>100?'…':''}</td>
-                    <td>${escapeHTML(j['ผู้รับผิดชอบ']||'')}</td>
-                    <td>${renderStatusPill(j['สถานะ'])}</td>
-                  </tr>`).join('')}
+                ${recentJobs.length === 0 ? '<tr><td colspan="6" class="muted" style="text-align:center;padding:30px;">ไม่มีข้อมูล</td></tr>' :
+                  recentJobs.map(j => {
+                    const jidx = state.data.jobs.indexOf(j);
+                    return `<tr>
+                      <td style="white-space:nowrap;">${fmtDate(j['วันที่'])}</td>
+                      <td style="white-space:nowrap;">${escapeHTML(j['เลขที่']||'')}</td>
+                      <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0,100))}${(j['รายละเอียด']||'').toString().length>100?'…':''}</td>
+                      <td>${escapeHTML(j['ผู้รับผิดชอบ']||'')}</td>
+                      <td>${renderStatusPill(j['สถานะ'])}</td>
+                      <td class="actions"><button class="btn btn-sm" data-editjob="${jidx}">แก้ไข</button></td>
+                    </tr>`;
+                  }).join('')}
               </tbody>
             </table>
           </div>
@@ -446,7 +470,7 @@ const Views = (() => {
       </div>
 
       ${overdue.length > 0 ? `
-      <div class="panel" style="margin-top:16px;">
+      <div class="panel" style="margin-bottom:16px;border-left:4px solid #ef4444;">
         <div class="panel-header">⚠️ Schedule เลยกำหนด (${overdue.length} งาน)</div>
         <div class="panel-body" style="padding:0;">
           <div class="table-wrap" style="border:none;border-radius:0;max-height:240px;">
@@ -457,7 +481,7 @@ const Views = (() => {
                   <td>${escapeHTML(t.DocNo||'')}</td>
                   <td>${escapeHTML(t.TaskName||'')}</td>
                   <td>${escapeHTML(t.Assignee||'')}</td>
-                  <td style="color:var(--danger);">${fmtDate(t.EndDate)}</td>
+                  <td style="color:#ef4444;font-weight:600;">${fmtDate(t.EndDate)}</td>
                   <td>${renderStatusPill(t.Status)}</td>
                 </tr>`).join('')}
               </tbody>
@@ -469,90 +493,191 @@ const Views = (() => {
 
     // Wire buttons
     const q = id => document.getElementById(id);
-    if (q('btnQuickAdd')) q('btnQuickAdd').onclick = () => Forms.openJob(null);
-    if (q('btnGoJobs')) q('btnGoJobs').onclick = () => render('jobs');
-    if (q('btnGoJobsAll')) q('btnGoJobsAll').onclick = () => render('jobs');
-    if (q('btnGoOutstanding')) q('btnGoOutstanding').onclick = () => {
-      q('outstandingPanel').scrollIntoView({ behavior: 'smooth' });
-    };
+    if (q('btnQuickAdd'))     q('btnQuickAdd').onclick = () => Forms.openJob(null);
+    if (q('btnGoJobs'))       q('btnGoJobs').onclick = () => render('jobs');
+    if (q('btnGoJobsAll'))    q('btnGoJobsAll').onclick = () => render('jobs');
+    if (q('btnGoOutstanding')) q('btnGoOutstanding').onclick = () => q('outstandingPanel').scrollIntoView({ behavior:'smooth' });
+    if (q('scJobsAll'))       q('scJobsAll').onclick = () => render('jobs');
+    if (q('scOutstanding'))   q('scOutstanding').onclick = () => q('outstandingPanel').scrollIntoView({ behavior:'smooth' });
     if (q('btnPrintLast') && lastJob) {
       q('btnPrintLast').onclick = () => {
         const idx = state.data.jobs.indexOf(lastJob);
         if (idx >= 0) Print.printWorkRequest(idx);
       };
     }
-    root.querySelectorAll('[data-editjob]').forEach(b => {
-      b.onclick = () => Forms.openJob(parseInt(b.dataset.editjob, 10));
-    });
-    root.querySelectorAll('[data-printjob]').forEach(b => {
-      b.onclick = () => Print.printWorkRequest(parseInt(b.dataset.printjob, 10));
-    });
+    if (q('btnCloseDetail')) q('btnCloseDetail').onclick = () => { q('chartDetailPanel').style.display = 'none'; };
+    root.querySelectorAll('[data-editjob]').forEach(b  => b.onclick  = () => Forms.openJob(parseInt(b.dataset.editjob, 10)));
+    root.querySelectorAll('[data-printjob]').forEach(b => b.onclick  = () => Print.printWorkRequest(parseInt(b.dataset.printjob, 10)));
 
-    // Load Chart.js and render charts async
+    // Trend toggle state
+    function setTrendMode(mode) {
+      root.querySelectorAll('.trend-toggle').forEach(b => {
+        const active = b.dataset.mode === mode;
+        b.style.background    = active ? '#fff' : 'transparent';
+        b.style.boxShadow     = active ? '0 1px 3px rgba(0,0,0,.12)' : 'none';
+        b.style.color         = active ? '#1e3a5f' : '#6b7280';
+        b.style.fontWeight    = active ? '600' : '400';
+      });
+      if (window.Chart) _renderTrendChart(mode, yearMonthData, monthlyMap);
+    }
+    root.querySelectorAll('.trend-toggle').forEach(b => { b.onclick = () => setTrendMode(b.dataset.mode); });
+
+    // Filter helper used by chart onClick
+    function onChartFilter(filterKey, filterVal) {
+      const panel = q('chartDetailPanel');
+      if (!filterVal) { panel.style.display = 'none'; return; }
+      const filtered = state.data.jobs.filter(j => (j[filterKey]||'').toString().trim() === filterVal);
+      q('chartDetailTitle').textContent = `${filterKey}: ${filterVal} — ${filtered.length} รายการ`;
+      q('chartDetailBody').innerHTML = `
+        <div class="table-wrap" style="max-height:220px;">
+          <table class="data">
+            <thead><tr><th>วันที่</th><th>เลขที่</th><th>รายละเอียด</th><th>ผู้รับผิดชอบ</th><th>สถานะ</th><th></th></tr></thead>
+            <tbody>
+              ${filtered.slice(0,20).map(j => {
+                const jidx = state.data.jobs.indexOf(j);
+                return `<tr>
+                  <td style="white-space:nowrap;">${fmtDate(j['วันที่'])}</td>
+                  <td style="white-space:nowrap;">${escapeHTML(j['เลขที่']||'')}</td>
+                  <td class="wrap">${escapeHTML((j['รายละเอียด']||'').toString().slice(0,80))}</td>
+                  <td>${escapeHTML(j['ผู้รับผิดชอบ']||'')}</td>
+                  <td>${renderStatusPill(j['สถานะ'])}</td>
+                  <td><button class="btn btn-sm" data-cdf="${jidx}">แก้ไข</button></td>
+                </tr>`;
+              }).join('')}
+              ${filtered.length > 20 ? `<tr><td colspan="6" class="muted" style="text-align:center;padding:8px;">และอีก ${filtered.length-20} รายการ</td></tr>` : ''}
+            </tbody>
+          </table>
+        </div>
+      `;
+      panel.style.display = 'block';
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      panel.querySelectorAll('[data-cdf]').forEach(b => { b.onclick = () => Forms.openJob(parseInt(b.dataset.cdf, 10)); });
+    }
+
+    // Load Chart.js and render
     _loadChartJs().then(() => {
-      _renderDashboardCharts({ statusCount, typeCount, topAssignees, monthlyMap });
+      _renderDashboardCharts({ statusCount, typeCount, topAssignees, onFilter: onChartFilter });
+      setTrendMode('month');
     }).catch(() => {
-      document.getElementById('chartsRow').innerHTML =
-        '<div class="muted" style="padding:20px;text-align:center;grid-column:1/-1;">ไม่สามารถโหลด Chart.js ได้ (ต้องมีอินเทอร์เน็ต)</div>';
+      q('chartsRow').innerHTML = '<div class="muted" style="padding:20px;text-align:center;grid-column:1/-1;">ไม่สามารถโหลด Chart.js ได้ (ต้องมีอินเทอร์เน็ต)</div>';
     });
   }
 
-  function _renderDashboardCharts({ statusCount, typeCount, topAssignees, monthlyMap }) {
-    const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16'];
+  function _renderTrendChart(mode, yearMonthData, monthlyMap) {
     const MONTHS_TH = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+    const LINE_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316'];
+    const canvas = document.getElementById('chartTrend');
+    if (!canvas) return;
+    const existing = Chart.getChart(canvas);
+    if (existing) existing.destroy();
 
-    function makeShortMonth(key) {
-      const [y, m] = key.split('-');
-      return MONTHS_TH[parseInt(m,10)-1] + ' ' + String(parseInt(y)+543).slice(-2);
+    if (mode === 'year') {
+      const years = Object.keys(yearMonthData).map(Number).sort();
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: MONTHS_TH,
+          datasets: years.map((yr, i) => ({
+            label: `ปี ${yr + 543}`,
+            data: yearMonthData[yr],
+            borderColor: LINE_COLORS[i % LINE_COLORS.length],
+            backgroundColor: 'transparent',
+            tension: 0.4, pointRadius: 4, borderWidth: 2.5,
+            pointBackgroundColor: LINE_COLORS[i % LINE_COLORS.length]
+          }))
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { font: { family: 'inherit', size: 11 }, boxWidth: 12 } } },
+          scales: {
+            x: { ticks: { font: { size: 11 } } },
+            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } }
+          }
+        }
+      });
+    } else {
+      function makeShortMonth(key) {
+        const [y, m] = key.split('-');
+        return MONTHS_TH[parseInt(m,10)-1] + ' ' + String(parseInt(y)+543).slice(-2);
+      }
+      const labels = Object.keys(monthlyMap).map(makeShortMonth);
+      const data = Object.values(monthlyMap);
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'งานใหม่', data,
+            borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)',
+            fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#3b82f6', borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { font: { size: 11 } } },
+            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } }
+          }
+        }
+      });
     }
+  }
 
-    // Destroy old charts if any (prevent duplicate canvas errors)
-    ['chartStatus','chartType','chartAssignee','chartMonthly'].forEach(id => {
-      const canvas = document.getElementById(id);
-      if (!canvas) return;
-      const existing = Chart.getChart(canvas);
-      if (existing) existing.destroy();
+  function _renderDashboardCharts({ statusCount, typeCount, topAssignees, onFilter }) {
+    const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899'];
+
+    ['chartStatus','chartType','chartAssignee'].forEach(id => {
+      const c = document.getElementById(id);
+      if (c) { const ex = Chart.getChart(c); if (ex) ex.destroy(); }
     });
 
-    const chartDefaults = {
-      plugins: { legend: { labels: { font: { family: 'inherit', size: 11 }, boxWidth: 12 } } }
-    };
+    function clickHandler(filterKey) {
+      return (event, activeElements, chart) => {
+        if (!activeElements.length) return;
+        const label = chart.data.labels[activeElements[0].index];
+        onFilter(filterKey, label);
+      };
+    }
 
-    // Status — Doughnut
     const statusCanvas = document.getElementById('chartStatus');
     if (statusCanvas && Object.keys(statusCount).length > 0) {
       new Chart(statusCanvas, {
         type: 'doughnut',
         data: {
           labels: Object.keys(statusCount),
-          datasets: [{ data: Object.values(statusCount), backgroundColor: COLORS, borderWidth: 2 }]
+          datasets: [{ data: Object.values(statusCount), backgroundColor: COLORS, borderWidth: 2, hoverOffset: 8 }]
         },
-        options: { responsive: true, maintainAspectRatio: true, ...chartDefaults,
-          plugins: { ...chartDefaults.plugins, tooltip: { callbacks: {
-            label: ctx => ` ${ctx.label}: ${ctx.raw} งาน`
-          }}}
+        options: {
+          responsive: true, maintainAspectRatio: true,
+          onClick: clickHandler('สถานะ'),
+          plugins: {
+            legend: { labels: { font: { family: 'inherit', size: 11 }, boxWidth: 12 } },
+            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} งาน` } }
+          }
         }
       });
     }
 
-    // Type — Doughnut
     const typeCanvas = document.getElementById('chartType');
     if (typeCanvas && Object.keys(typeCount).length > 0) {
       new Chart(typeCanvas, {
         type: 'doughnut',
         data: {
           labels: Object.keys(typeCount),
-          datasets: [{ data: Object.values(typeCount), backgroundColor: COLORS.slice(2), borderWidth: 2 }]
+          datasets: [{ data: Object.values(typeCount), backgroundColor: COLORS.slice(2), borderWidth: 2, hoverOffset: 8 }]
         },
-        options: { responsive: true, maintainAspectRatio: true, ...chartDefaults,
-          plugins: { ...chartDefaults.plugins, tooltip: { callbacks: {
-            label: ctx => ` ${ctx.label}: ${ctx.raw} งาน`
-          }}}
+        options: {
+          responsive: true, maintainAspectRatio: true,
+          onClick: clickHandler('ประเภท'),
+          plugins: {
+            legend: { labels: { font: { family: 'inherit', size: 11 }, boxWidth: 12 } },
+            tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw} งาน` } }
+          }
         }
       });
     }
 
-    // Assignee — Horizontal Bar
     const assigneeCanvas = document.getElementById('chartAssignee');
     if (assigneeCanvas && topAssignees.length > 0) {
       new Chart(assigneeCanvas, {
@@ -560,36 +685,18 @@ const Views = (() => {
         data: {
           labels: topAssignees.map(a => a[0]),
           datasets: [{ label: 'จำนวนงาน', data: topAssignees.map(a => a[1]),
-            backgroundColor: '#3b82f6', borderRadius: 4 }]
+            backgroundColor: COLORS, borderRadius: 6, borderSkipped: false }]
         },
-        options: { indexAxis: 'y', responsive: true, maintainAspectRatio: true,
-          plugins: { legend: { display: false } },
-          scales: { x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } },
-            y: { ticks: { font: { size: 11 } } } }
-        }
-      });
-    }
-
-    // Monthly trend — Line
-    const monthlyCanvas = document.getElementById('chartMonthly');
-    if (monthlyCanvas) {
-      const labels = Object.keys(monthlyMap).map(makeShortMonth);
-      const data = Object.values(monthlyMap);
-      new Chart(monthlyCanvas, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: 'งานใหม่', data,
-            borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)',
-            fill: true, tension: 0.4, pointRadius: 4, pointBackgroundColor: '#3b82f6'
-          }]
-        },
-        options: { responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: true,
+          onClick: clickHandler('ผู้รับผิดชอบ'),
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ` ${ctx.raw} งาน` } }
+          },
           scales: {
-            x: { ticks: { font: { size: 11 } } },
-            y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } }
+            x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } },
+            y: { ticks: { font: { size: 11 } } }
           }
         }
       });
@@ -608,13 +715,14 @@ const Views = (() => {
     renderGenericTable({
       view: 'jobs',
       title: 'ใบงาน (Jobs)',
+      actionColWidth: '240px',
       columns: [
         { key: 'วันที่', label: 'วันที่', type: 'date' },
         { key: 'เลขที่', label: 'เลขที่' },
         { key: 'PO', label: 'PO' },
         { key: 'บริษัท', label: 'บริษัท' },
         { key: 'ประเภท', label: 'ประเภท' },
-        { key: 'รายละเอียด', label: 'รายละเอียด', type: 'long' },
+        { key: 'รายละเอียด', label: 'รายละเอียด', type: 'detail' }, // คลิกดูรายละเอียด
         { key: 'สถานะ', label: 'สถานะ', type: 'status' },
         { key: 'ผู้รับผิดชอบ', label: 'ผู้รับผิดชอบ' },
         { key: 'จำนวน', label: 'จำนวน', type: 'number' },
@@ -630,9 +738,16 @@ const Views = (() => {
         { key: 'ผู้รับผิดชอบ', label: 'ผู้รับผิดชอบ', type: 'select', options: collectUnique('jobs', 'ผู้รับผิดชอบ') }
       ],
       rowActions: [
-        { id: 'print', label: '🖨', cls: 'btn-primary', title: 'พิมพ์ใบแจ้งงาน',
-          handler: (idx) => Print.printWorkRequest(idx) }
+        { id: 'print',    label: '🖨',  cls: 'btn-primary', title: 'พิมพ์ใบแจ้งงาน',
+          handler: idx => Print.printWorkRequest(idx) },
+        { id: 'delivery', label: '📦',  cls: 'btn-success', title: 'สร้างใบส่งของ',
+          handler: idx => Forms.createDeliveryFromJob(idx) },
+        { id: 'schedule', label: '📅',  cls: '',            title: 'วางแผนงาน',
+          handler: idx => Forms.createScheduleFromJob(idx) },
+        { id: 'cost',     label: '💰',  cls: '',            title: 'เพิ่มต้นทุน',
+          handler: idx => Forms.createCostFromJob(idx) }
       ],
+      onRowDetail: idx => Forms.openJobDetail(idx),
       onAdd: () => Forms.openJob(null),
       onEdit: idx => Forms.openJob(idx),
       onDelete: async idx => {

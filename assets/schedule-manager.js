@@ -84,19 +84,19 @@ const ScheduleManager = (() => {
       .sm-gantt-scroll{overflow-x:auto;}
       .sm-gantt-scroll::-webkit-scrollbar{height:5px;}
       .sm-gantt-scroll::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px;}
-      .sm-grow{display:flex;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-height:18px;}
-      .sm-gweek{display:flex;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-height:15px;}
-      .sm-gmon{border-right:1px solid #e5e7eb;font-size:10px;font-weight:800;color:#374151;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-      .sm-gwk{border-right:1px solid #e5e7eb;font-size:9px;font-weight:700;color:#9ca3af;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-      .sm-gtr{display:flex;align-items:stretch;min-height:34px;border-bottom:1px dotted #e5e7eb;}
-      .sm-gtr:hover{background:#faf5ff;}
+      .sm-grow{display:flex;border-bottom:1px solid #cbd5e1;min-height:20px;}
+      .sm-gweek{display:flex;border-bottom:2px solid #cbd5e1;min-height:16px;background:#f8fafc;}
+      .sm-gmon{border-right:1px solid #e5e7eb;font-size:10px;font-weight:800;color:#374151;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0 2px;}
+      .sm-gwk{border-right:1px solid #e5e7eb;font-size:9px;font-weight:700;color:#6b7280;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+      .sm-gtr{display:flex;align-items:stretch;min-height:38px;border-bottom:1px solid #e5e7eb;}
+      .sm-gtr:hover{background:#faf5ff!important;}
       .sm-ginfo{width:40%;flex-shrink:0;display:flex;border-right:2px solid #e5e7eb;background:inherit;}
       .sm-gname{width:50%;padding:3px 6px;border-right:1px solid #e5e7eb;font-size:9px;font-weight:700;color:#1e293b;display:flex;align-items:flex-start;gap:2px;}
       .sm-gasn{width:20%;padding:3px;border-right:1px solid #e5e7eb;font-size:9px;font-weight:700;color:#475569;display:flex;align-items:center;justify-content:center;text-align:center;}
       .sm-gdates{width:30%;padding:2px 3px;font-size:8px;font-weight:700;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;}
       .sm-gchart{flex:1;position:relative;min-width:0;}
-      .sm-bplan{position:absolute;height:7px;background:#cbd5e1;border:1px solid #94a3b8;border-radius:2px;top:50%;transform:translateY(-4px);z-index:1;min-width:3px;}
-      .sm-bact{position:absolute;height:6px;border-radius:2px;top:50%;transform:translateY(3px);z-index:2;min-width:3px;}
+      .sm-bplan{position:absolute;height:10px;background:linear-gradient(to right,#a5b4fc,#818cf8);border:1px solid #6366f1;border-radius:3px;top:50%;transform:translateY(-11px);z-index:1;min-width:4px;box-shadow:0 1px 3px rgba(99,102,241,.3);}
+      .sm-bact{position:absolute;height:9px;border-radius:3px;top:50%;transform:translateY(2px);z-index:2;min-width:4px;box-shadow:0 1px 3px rgba(0,0,0,.15);}
       /* Footer */
       .sm-foot{padding:10px 18px;background:#fff;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;box-shadow:0 -2px 8px rgba(0,0,0,.04);}
       /* Dashboard */
@@ -161,10 +161,16 @@ const ScheduleManager = (() => {
     let cur = new Date(mn);
     while (cur <= mx) {
       months.push({ y:cur.getFullYear(), m:cur.getMonth(),
+        days: new Date(cur.getFullYear(), cur.getMonth()+1, 0).getDate(),
         label: cur.toLocaleDateString('th-TH',{month:'short',year:'2-digit'}) });
       cur.setMonth(cur.getMonth()+1);
     }
-    return { min:mn, max:mx, months, ms: mx - mn };
+    // build days list for day-mode
+    const days = [];
+    const DAY_MS = 86400000;
+    let dc = new Date(mn);
+    while (dc <= mx) { days.push(new Date(dc)); dc = new Date(dc.getTime() + DAY_MS); }
+    return { min:mn, max:mx, months, ms: mx - mn, days };
   }
 
   const _pct = (ds, tl) => {
@@ -189,53 +195,120 @@ const ScheduleManager = (() => {
     if (!vt.length) return `<div class="sm-gantt"><div style="padding:24px;text-align:center;color:#94a3b8;font-weight:700;">ยังไม่มีงานที่ระบุวันที่</div></div>`;
     const tl = _timeline(vt);
     if (!tl) return '';
-    const mw = 100 / tl.months.length;
-    const mHtml = tl.months.map(m=>`<div class="sm-gmon" style="width:${mw}%">${m.label}</div>`).join('');
-    const wHtml = tl.months.map(()=>['W1','W2','W3','W4'].map(w=>`<div class="sm-gwk" style="width:${mw/4}%">${w}</div>`).join('')).join('');
-    const rowsHtml = vt.map((t,i) => {
-      const pL=_pct(t.StartDate,tl), pW=Math.max(.5,_pct(t.EndDate,tl)-pL);
-      let aL=null, aW=null;
+
+    const totalMonths = tl.months.length;
+    const mode = totalMonths <= 2 ? 'day' : 'week';
+
+    /* ---------- TODAY marker ---------- */
+    const todayPct = _pct(new Date(), tl);
+    const showToday = todayPct > 0 && todayPct < 100;
+    const todayLine = showToday
+      ? `<div style="position:absolute;left:${todayPct}%;top:0;bottom:0;width:2px;background:rgba(239,68,68,.55);z-index:5;pointer-events:none;">
+           <div style="position:absolute;top:0;left:-14px;background:#ef4444;color:#fff;font-size:7px;font-weight:900;padding:1px 3px;border-radius:2px;white-space:nowrap;">วันนี้</div>
+         </div>` : '';
+
+    /* ---------- Header rows ---------- */
+    let mHtml = '', subHtml = '', gridBg = '';
+
+    if (mode === 'day') {
+      /* DAY MODE — แสดงรายวัน */
+      const totalDays = tl.days.length;
+      const dayW = 100 / totalDays;
+
+      /* Month row — width proportional to days in month */
+      mHtml = tl.months.map(m => {
+        const w = m.days / totalDays * 100;
+        return `<div class="sm-gmon" style="width:${w}%;border-right:2px solid #6b7280;background:#eef2ff;color:#3730a3;">${m.label}</div>`;
+      }).join('');
+
+      /* Day sub-row — label every 5th day */
+      const step = totalDays > 50 ? 10 : 5;
+      subHtml = tl.days.map((d, i) => {
+        const dn = d.getDate();
+        const isMonBoundary = dn === 1;
+        const label = (dn === 1 || dn % step === 0) ? String(dn) : '';
+        return `<div class="sm-gwk" style="width:${dayW}%;font-size:7px;font-weight:${label?'800':'400'};color:${isMonBoundary?'#3730a3':'#6b7280'};border-right:${isMonBoundary?'2px solid #6b7280':'1px solid #e5e7eb'};background:${isMonBoundary?'#eef2ff':'transparent'};justify-content:center;">${label}</div>`;
+      }).join('');
+
+      /* Grid background — thin line every day, accent every 7 */
+      gridBg = `background-image:repeating-linear-gradient(to right,rgba(209,213,219,0.55) 0,rgba(209,213,219,0.55) 1px,transparent 1px,transparent ${dayW}%);`;
+
+    } else {
+      /* WEEK MODE — แสดงรายสัปดาห์ */
+      const mw = 100 / totalMonths;
+      const ww = mw / 4;
+      const totalCells = totalMonths * 4;
+      const cw = 100 / totalCells;
+
+      mHtml = tl.months.map(m =>
+        `<div class="sm-gmon" style="width:${mw}%;border-right:2px solid #6b7280;background:#f0fdf4;color:#065f46;">${m.label}</div>`
+      ).join('');
+
+      subHtml = tl.months.map(() =>
+        ['W1','W2','W3','W4'].map(w =>
+          `<div class="sm-gwk" style="width:${ww}%;font-size:9px;font-weight:800;color:#374151;">${w}</div>`
+        ).join('')
+      ).join('');
+
+      /* Grid — line every week, thicker every month (handled by border-right on mHtml) */
+      gridBg = `background-image:repeating-linear-gradient(to right,rgba(209,213,219,0.6) 0,rgba(209,213,219,0.6) 1px,transparent 1px,transparent ${cw}%);`;
+    }
+
+    /* ---------- Task rows ---------- */
+    const rowsHtml = vt.map((t, i) => {
+      const pL = _pct(t.StartDate, tl);
+      const pW = Math.max(0.5, _pct(t.EndDate, tl) - pL);
+      let aL = null, aW = null;
       if (t.ActualStartDate) {
         aL = _pct(t.ActualStartDate, tl);
-        aW = Math.max(.5, _pct(t.ActualEndDate||new Date(), tl) - aL);
+        aW = Math.max(0.5, _pct(t.ActualEndDate || new Date(), tl) - aL);
       }
-      const aCol = _acolor(t.Status||'');
-      const pd = `${fmtDate(t.StartDate)}${t.EndDate!==t.StartDate?' - '+fmtDate(t.EndDate):''}`;
-      const ad = t.ActualStartDate ? `${fmtDate(t.ActualStartDate)}${t.ActualEndDate?' - '+fmtDate(t.ActualEndDate):''}` : '-';
-      return `<div class="sm-gtr">
+      const aCol = _acolor(t.Status || '');
+      const pd = `${fmtDate(t.StartDate)}${t.EndDate !== t.StartDate ? ' – ' + fmtDate(t.EndDate) : ''}`;
+      const ad = t.ActualStartDate ? `${fmtDate(t.ActualStartDate)}${t.ActualEndDate ? ' – ' + fmtDate(t.ActualEndDate) : ''}` : '-';
+      const isEven = i % 2 === 0;
+      return `<div class="sm-gtr" style="${isEven?'background:#fafafa;':'background:#fff;'}">
         <div class="sm-ginfo">
-          <div class="sm-gname"><span style="color:#94a3b8;flex-shrink:0;">${i+1}.</span><span>${escapeHTML(t.TaskName||'')}</span></div>
+          <div class="sm-gname"><span style="color:#94a3b8;flex-shrink:0;margin-right:3px;">${i+1}.</span><span>${escapeHTML(t.TaskName||'')}</span></div>
           <div class="sm-gasn">${escapeHTML(t.Assignee||'-')}</div>
           <div class="sm-gdates"><span style="color:#4338ca;">${escapeHTML(pd)}</span><span style="color:#059669;">${escapeHTML(ad)}</span></div>
         </div>
-        <div class="sm-gchart">
+        <div class="sm-gchart" style="${gridBg}position:relative;">
+          ${todayLine}
           <div class="sm-bplan" style="left:${pL}%;width:${pW}%;"></div>
-          ${aL!==null?`<div class="sm-bact" style="left:${aL}%;width:${aW}%;background:${aCol};"></div>`:''}
+          ${aL !== null ? `<div class="sm-bact" style="left:${aL}%;width:${aW}%;background:${aCol};"></div>` : ''}
         </div>
       </div>`;
     }).join('');
+
+    const modeLabel = mode === 'day' ? '📅 โหมดรายวัน' : '📆 โหมดรายสัปดาห์';
+
     return `<div class="sm-gantt">
       <div class="sm-gantt-hd">
-        <span style="font-size:14px;font-weight:900;color:#1e293b;">📊 Graphic Timeline Preview</span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:14px;font-weight:900;color:#1e293b;">📊 Graphic Timeline Preview</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;color:#64748b;">${modeLabel}</span>
+        </div>
         <div class="sm-gantt-leg">
-          <div class="sm-gantt-leg-i"><div class="sm-gantt-leg-d" style="background:#cbd5e1;border:1px solid #94a3b8;"></div> แผนงาน (Plan)</div>
+          <div class="sm-gantt-leg-i"><div class="sm-gantt-leg-d" style="background:#a5b4fc;border:1px solid #818cf8;"></div> แผนงาน (Plan)</div>
           <div class="sm-gantt-leg-i"><div class="sm-gantt-leg-d" style="background:#10b981;"></div> เสร็จแล้ว</div>
           <div class="sm-gantt-leg-i"><div class="sm-gantt-leg-d" style="background:#f59e0b;"></div> กำลังทำ</div>
           <div class="sm-gantt-leg-i"><div class="sm-gantt-leg-d" style="background:#f43f5e;"></div> ล่าช้า</div>
+          ${showToday ? '<div class="sm-gantt-leg-i"><div style="width:8px;height:14px;background:rgba(239,68,68,.5);border-radius:1px;"></div> วันนี้</div>' : ''}
         </div>
       </div>
       <div class="sm-gantt-scroll">
-        <div style="display:flex;border-bottom:2px solid #e5e7eb;background:#f8fafc;">
-          <div style="width:40%;border-right:2px solid #e5e7eb;display:flex;background:#fff;">
-            <div style="width:50%;border-right:1px solid #e5e7eb;padding:4px 6px;font-size:10px;font-weight:800;color:#475569;text-transform:uppercase;display:flex;align-items:center;justify-content:center;text-align:center;">รายละเอียดขั้นตอน</div>
+        <div style="display:flex;border-bottom:2px solid #e2e8f0;background:#f8fafc;">
+          <div style="width:40%;border-right:2px solid #cbd5e1;display:flex;background:#fff;flex-shrink:0;">
+            <div style="width:50%;border-right:1px solid #e5e7eb;padding:5px 6px;font-size:10px;font-weight:800;color:#475569;text-transform:uppercase;display:flex;align-items:center;justify-content:center;text-align:center;">รายละเอียดขั้นตอน</div>
             <div style="width:20%;border-right:1px solid #e5e7eb;padding:4px;font-size:9px;font-weight:800;color:#475569;text-transform:uppercase;display:flex;align-items:center;justify-content:center;">ผู้รับผิดชอบ</div>
             <div style="width:30%;padding:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:800;text-transform:uppercase;text-align:center;">
-              <span style="color:#3730a3;">แผนงาน (PLAN)</span><span style="color:#065f46;font-size:8px;">ทำจริง (ACTUAL)</span>
+              <span style="color:#3730a3;">แผนงาน</span><span style="color:#065f46;font-size:8px;">ทำจริง</span>
             </div>
           </div>
-          <div style="flex:1;display:flex;flex-direction:column;">
-            <div class="sm-grow">${mHtml}</div>
-            <div class="sm-gweek">${wHtml}</div>
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+            <div class="sm-grow" style="border-bottom:1px solid #cbd5e1;">${mHtml}</div>
+            <div class="sm-gweek">${subHtml}</div>
           </div>
         </div>
         ${rowsHtml}

@@ -194,26 +194,51 @@ const Forms = (() => {
   function openJob(idx) {
     const editing = idx != null;
     const row = editing ? { ...state.data.jobs[idx] } : {};
+    const today = new Date().toISOString().slice(0, 10);
+
+    // บริษัท → suffix ของเลขที่ใบงาน
+    const COMPANY_SUFFIX = {
+      'BFL': '-FL', 'BFLPC': '-PC', 'BFLFP': '-FP', 'SMEC': '-SM', 'อื่นๆ': '-ER'
+    };
+
     if (!editing) {
-      row['วันที่'] = new Date();
-      row['เลขที่'] = App.nextDocNo('SM', 'jobs') + '-PC';
+      row['วันที่'] = today;
       row['สถานะ'] = 'รอดำเนินการ';
+      row['เลขที่'] = ''; // สร้างอัตโนมัติเมื่อเลือกบริษัท
     }
 
     const fields = [
+      // บริษัทต้องอยู่บนสุด — ขับเคลื่อน suffix ของเลขที่
+      {
+        key: 'บริษัท', label: 'บริษัท', type: 'select', required: true,
+        options: uniqueWith('jobs', 'บริษัท', ['BFLPC', 'BFL', 'BFLFP', 'SMEC', 'อื่นๆ']),
+        onChange: (refs) => {
+          const company = refs['บริษัท'].el.value;
+          if (!company) return;
+          const suffix = COMPANY_SUFFIX[company] || '-ER';
+          if (!editing) {
+            refs['เลขที่'].el.value = App.nextDocNo('SM', 'jobs') + suffix;
+          } else {
+            // แก้ suffix เฉพาะส่วนท้าย
+            const cur = refs['เลขที่'].el.value;
+            const base = cur.replace(/-[A-Za-z]+$/, '');
+            refs['เลขที่'].el.value = base + suffix;
+          }
+        }
+      },
       { key: 'วันที่', label: 'วันที่', type: 'date', required: true },
-      { key: 'เลขที่', label: 'เลขที่ใบงาน', required: true, placeholder: 'เช่น SM-2605001-PC' },
+      { key: 'เลขที่', label: 'เลขที่ใบงาน', required: true, placeholder: 'เลือกบริษัทเพื่อสร้างอัตโนมัติ' },
       { key: 'เลขที่โครงการ', label: 'เลขที่โครงการ' },
       { key: 'ชื่อโครงการ', label: 'ชื่อโครงการ' },
       { key: 'PO', label: 'PO' },
-      { key: 'บริษัท', label: 'บริษัท', type: 'select', options: uniqueWith('jobs', 'บริษัท', ['BFLPC','BFL','SMEC']) },
       { key: 'ผู้แจ้ง', label: 'ผู้แจ้ง/แผนก' },
-      { key: 'ประเภท', label: 'ประเภท', type: 'select', options: uniqueWith('jobs', 'ประเภท', ['งาน DIE','สร้าง','ซ่อม','ผลิต','ออกแบบ','อื่นๆ']) },
-      { key: 'รายละเอียด', label: 'รายละเอียด', type: 'textarea', full: true, rows: 4 },
-      { key: 'รายการย่อย', label: 'รายการย่อย', type: 'textarea', full: true, rows: 3 },
-      { key: 'สถานะ', label: 'สถานะ', type: 'select', options: ['รอดำเนินการ','กำลังดำเนินการ','เสร็จแล้ว','ส่งงานแล้ว','ยกเลิก','รออะไหล่'] },
+      { key: 'ประเภท', label: 'ประเภท', type: 'select', options: uniqueWith('jobs', 'ประเภท', ['งาน DIE', 'สร้าง', 'ซ่อม', 'ผลิต', 'ออกแบบ', 'อื่นๆ']) },
+      { key: 'รายละเอียด', label: 'รายละเอียด', type: 'textarea', full: true, rows: 3 },
+      // รายการย่อย — widget แบบ dynamic จะถูก inject หลัง buildForm
+      { key: 'สถานะ', label: 'สถานะ', type: 'select', options: ['รอดำเนินการ', 'กำลังดำเนินการ', 'เสร็จแล้ว', 'ส่งงานแล้ว', 'ยกเลิก', 'รออะไหล่'] },
       { key: 'วันที่สถานะ', label: 'วันที่อัปเดตสถานะ', type: 'date' },
-      { key: 'ผู้รับผิดชอบ', label: 'ผู้รับผิดชอบ', type: 'select', options: uniqueWith('jobs', 'ผู้รับผิดชอบ', []) },
+      // ผู้รับผิดชอบ — text input + datalist จะถูก inject หลัง buildForm
+      { key: 'ผู้รับผิดชอบ', label: 'ผู้รับผิดชอบ', placeholder: 'พิมพ์หรือเลือกจากประวัติ' },
       { key: 'จำนวน', label: 'จำนวน', type: 'number' },
       { key: 'จำนวนที่ส่ง', label: 'จำนวนที่ส่ง', type: 'number' },
       { key: 'จำนวนค้างส่ง', label: 'จำนวนค้างส่ง', type: 'number' },
@@ -237,23 +262,61 @@ const Forms = (() => {
 
     const formObj = buildForm(fields, row);
 
+    // ── datalist: เลขที่โครงการ ─────────────────────────────────────────
+    const projNums = [...new Set((state.data.jobs || []).map(j => j['เลขที่โครงการ']).filter(Boolean))].sort();
+    const dlProjId = 'dl-proj-' + Date.now();
+    const dlProj = document.createElement('datalist');
+    dlProj.id = dlProjId;
+    projNums.forEach(p => { const o = document.createElement('option'); o.value = p; dlProj.appendChild(o); });
+    formObj.el.appendChild(dlProj);
+    const projEl = formObj.refs['เลขที่โครงการ'].el;
+    projEl.setAttribute('list', dlProjId);
+    projEl.autocomplete = 'off';
+    // ปุ่ม "สร้างเลขที่ใหม่" ใต้ช่องโครงการ
+    const projWrap = projEl.parentElement;
+    const btnNewProj = document.createElement('button');
+    btnNewProj.type = 'button';
+    btnNewProj.className = 'btn btn-ghost';
+    btnNewProj.style.cssText = 'margin-top:4px;font-size:12px;padding:2px 10px;';
+    btnNewProj.textContent = '+ สร้างเลขที่โครงการใหม่';
+    btnNewProj.onclick = () => { projEl.value = _nextProjectNo(projNums); };
+    projWrap.appendChild(btnNewProj);
+
+    // ── datalist: ผู้รับผิดชอบ ──────────────────────────────────────────
+    const dlAssigneeId = 'dl-assignee-' + Date.now();
+    const dlAssignee = document.createElement('datalist');
+    dlAssignee.id = dlAssigneeId;
+    uniqueWith('jobs', 'ผู้รับผิดชอบ', []).forEach(a => {
+      const o = document.createElement('option'); o.value = a; dlAssignee.appendChild(o);
+    });
+    formObj.el.appendChild(dlAssignee);
+    formObj.refs['ผู้รับผิดชอบ'].el.setAttribute('list', dlAssigneeId);
+    formObj.refs['ผู้รับผิดชอบ'].el.autocomplete = 'off';
+
+    // ── รายการย่อย: dynamic add/remove list ─────────────────────────────
+    const subItemsWidget = _buildSubItemsWidget(row['รายการย่อย']);
+    // แทรกก่อน field "สถานะ"
+    const statusWrap = formObj.refs['สถานะ'].el.parentElement;
+    formObj.el.insertBefore(subItemsWidget.el, statusWrap);
+
+    // ── Footer ──────────────────────────────────────────────────────────
     const footer = document.createElement('div');
     footer.style.display = 'flex'; footer.style.gap = '8px'; footer.style.width = '100%';
+
     const btnCancel = document.createElement('button');
     btnCancel.className = 'btn btn-ghost'; btnCancel.textContent = 'ยกเลิก';
     btnCancel.onclick = () => App.closeModal();
 
-    // Print Work Request button (visible when editing or after first save)
     const btnPrint = document.createElement('button');
     btnPrint.className = 'btn btn-primary';
     btnPrint.innerHTML = '🖨 พิมพ์ใบแจ้งงาน';
     btnPrint.style.marginRight = 'auto';
     btnPrint.title = 'บันทึกข้อมูลแล้วเปิดหน้าพิมพ์ใบแจ้งงาน';
     btnPrint.onclick = async () => {
-      // Save first, then open print
       btnPrint.disabled = true;
       try {
         const vals = formObj.getValues();
+        vals['รายการย่อย'] = subItemsWidget.getValue();
         if (!vals['เลขที่']) { App.toast('กรุณากรอกเลขที่ใบงานก่อน', 'error'); btnPrint.disabled = false; return; }
         const fileVals = await formObj.commitFiles(vals['เลขที่']);
         Object.assign(vals, fileVals);
@@ -261,7 +324,7 @@ const Forms = (() => {
           vals['จำนวนค้างส่ง'] = (vals['จำนวน'] || 0) - (vals['จำนวนที่ส่ง'] || 0);
         }
         if (!vals['ผู้บันทึก']) vals['ผู้บันทึก'] = 'ระบบ';
-        if (!vals['วันที่ลงบันทึก']) vals['วันที่ลงบันทึก'] = new Date().toISOString().slice(0,10);
+        if (!vals['วันที่ลงบันทึก']) vals['วันที่ลงบันทึก'] = new Date().toISOString().slice(0, 10);
         let targetIdx = idx;
         if (editing) state.data.jobs[idx] = { ...state.data.jobs[idx], ...vals };
         else { state.data.jobs.unshift(vals); targetIdx = 0; }
@@ -284,18 +347,17 @@ const Forms = (() => {
     btnOk.className = 'btn btn-primary'; btnOk.textContent = editing ? 'อัปเดต' : 'บันทึก';
     btnOk.onclick = async () => {
       const vals = formObj.getValues();
+      vals['รายการย่อย'] = subItemsWidget.getValue();
       if (!vals['เลขที่']) { App.toast('กรุณากรอกเลขที่ใบงาน', 'error'); return; }
       btnOk.disabled = true; btnOk.textContent = 'กำลังบันทึก...';
       try {
         const fileVals = await formObj.commitFiles(vals['เลขที่']);
         Object.assign(vals, fileVals);
-        // auto จำนวนค้างส่ง = จำนวน − จำนวนที่ส่ง
         if (vals['จำนวน'] != null && vals['จำนวนที่ส่ง'] != null) {
           vals['จำนวนค้างส่ง'] = (vals['จำนวน'] || 0) - (vals['จำนวนที่ส่ง'] || 0);
         }
         if (!vals['ผู้บันทึก']) vals['ผู้บันทึก'] = 'ระบบ';
-        if (!vals['วันที่ลงบันทึก']) vals['วันที่ลงบันทึก'] = new Date().toISOString().slice(0,10);
-
+        if (!vals['วันที่ลงบันทึก']) vals['วันที่ลงบันทึก'] = new Date().toISOString().slice(0, 10);
         if (editing) state.data.jobs[idx] = { ...state.data.jobs[idx], ...vals };
         else state.data.jobs.unshift(vals);
         const ok = await App.saveAll();
@@ -312,6 +374,7 @@ const Forms = (() => {
         btnOk.disabled = false; btnOk.textContent = editing ? 'อัปเดต' : 'บันทึก';
       }
     };
+
     footer.appendChild(btnPrint);
     footer.appendChild(btnCancel);
     footer.appendChild(btnOk);
@@ -324,8 +387,79 @@ const Forms = (() => {
     });
   }
 
+  // ── helper: คำนวณเลขที่โครงการถัดไป ──────────────────────────────────
+  function _nextProjectNo(existingNums) {
+    if (!existingNums || !existingNums.length) return 'P-001';
+    let maxNum = 0, prefix = 'P-', padLen = 3;
+    for (const n of existingNums) {
+      const m = String(n).match(/^([A-Za-z\-]*)(\d+)$/);
+      if (m) {
+        const num = parseInt(m[2], 10);
+        if (num > maxNum) { maxNum = num; prefix = m[1]; padLen = m[2].length; }
+      }
+    }
+    return prefix + String(maxNum + 1).padStart(padLen, '0');
+  }
+
+  // ── helper: dynamic sub-items list widget ────────────────────────────
+  function _buildSubItemsWidget(initialValue) {
+    const items = initialValue
+      ? String(initialValue).split('\n').filter(s => s.trim())
+      : [];
+
+    const container = document.createElement('div');
+    container.className = 'field full';
+
+    const lbl = document.createElement('label');
+    lbl.textContent = 'รายการย่อย';
+    container.appendChild(lbl);
+
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    container.appendChild(list);
+
+    const btnAdd = document.createElement('button');
+    btnAdd.type = 'button';
+    btnAdd.className = 'btn btn-ghost';
+    btnAdd.style.cssText = 'margin-top:6px;width:100%;font-size:13px;';
+    btnAdd.textContent = '+ เพิ่มรายการ';
+    container.appendChild(btnAdd);
+
+    function addItem(text) {
+      const rowEl = document.createElement('div');
+      rowEl.style.cssText = 'display:flex;gap:6px;align-items:center;';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = text || '';
+      inp.placeholder = 'รายการย่อย...';
+      inp.style.flex = '1';
+      const btnDel = document.createElement('button');
+      btnDel.type = 'button';
+      btnDel.className = 'btn btn-ghost';
+      btnDel.style.cssText = 'padding:2px 8px;color:#ef4444;flex-shrink:0;';
+      btnDel.textContent = '✕';
+      btnDel.onclick = () => list.removeChild(rowEl);
+      rowEl.appendChild(inp);
+      rowEl.appendChild(btnDel);
+      list.appendChild(rowEl);
+      return inp;
+    }
+
+    items.forEach(item => addItem(item));
+    if (!items.length) addItem('');
+
+    btnAdd.onclick = () => { const inp = addItem(''); inp.focus(); };
+
+    function getValue() {
+      return [...list.querySelectorAll('input')]
+        .map(i => i.value.trim()).filter(Boolean).join('\n');
+    }
+
+    return { el: container, getValue };
+  }
+
   // -------------------- DELIVERY FORM --------------------
-  function openDelivery(idx) {
+  function openDelivery(idx, preset = {}) {
     const editing = idx != null;
     const row = editing ? { ...state.data.delivery[idx] } : {};
     if (!editing) {
@@ -333,6 +467,7 @@ const Forms = (() => {
       row['วันที่'] = new Date();
       row['เลขที่ใบส่งของ'] = App.nextDocNo('DO', 'delivery', 'เลขที่ใบส่งของ');
       row['ประเภท'] = 'ใบส่งของชั่วคราว (อิสระ)';
+      Object.assign(row, preset); // pre-fill จากใบงาน (ถ้ามี)
     }
 
     const fields = [
@@ -416,13 +551,14 @@ const Forms = (() => {
   }
 
   // -------------------- SCHEDULE FORM --------------------
-  function openSchedule(idx) {
+  function openSchedule(idx, preset = {}) {
     const editing = idx != null;
     const row = editing ? { ...state.data.schedule[idx] } : {};
     if (!editing) {
       row['Task_ID'] = App.nextTaskId();
       row['Status'] = 'รอดำเนินการ';
       row['LastUpdated'] = new Date();
+      Object.assign(row, preset);
     }
 
     // DocNo options from jobs
@@ -460,7 +596,7 @@ const Forms = (() => {
   }
 
   // -------------------- COSTS FORM --------------------
-  function openCost(idx) {
+  function openCost(idx, preset = {}) {
     const editing = idx != null;
     const row = editing ? { ...state.data.costs[idx] } : {};
     if (!editing) {
@@ -468,6 +604,7 @@ const Forms = (() => {
       row['วันที่'] = new Date();
       row['VAT'] = 7;
       row['วันที่ บันทึก'] = new Date();
+      Object.assign(row, preset);
     }
 
     const jobOpts = [...new Set(state.data.jobs.map(j => j['เลขที่']).filter(Boolean))].sort();
@@ -535,6 +672,135 @@ const Forms = (() => {
     });
   }
 
+  // -------------------- JOB DETAIL MODAL --------------------
+  function openJobDetail(idx) {
+    const row = state.data.jobs[idx] || {};
+
+    const body = document.createElement('div');
+
+    // ── Header badge ──────────────────────────────────────────────────────
+    const badge = document.createElement('div');
+    badge.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:2px solid #e5e7eb;';
+    badge.innerHTML = `
+      <div style="font-size:22px;font-weight:700;color:#1e3a5f;">${escapeHTML(row['เลขที่'] || '-')}</div>
+      <div style="padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af;">${escapeHTML(row['บริษัท'] || '')}</div>
+      <div style="padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#fef3c7;color:#92400e;">${escapeHTML(row['ประเภท'] || '')}</div>
+    `;
+    body.appendChild(badge);
+
+    // ── 2-column info grid ────────────────────────────────────────────────
+    const grid = document.createElement('div');
+    grid.className = 'form-grid';
+
+    function addRow(label, val, full) {
+      if (val == null || val === '') return;
+      const d = document.createElement('div');
+      d.className = 'field' + (full ? ' full' : '');
+      d.innerHTML = `<label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#9ca3af;">${escapeHTML(label)}</label>
+        <div style="padding:5px 0 6px;font-size:14px;color:#111827;border-bottom:1px solid #f3f4f6;white-space:pre-wrap;">${escapeHTML(String(val))}</div>`;
+      grid.appendChild(d);
+    }
+
+    addRow('วันที่', fmtDate(row['วันที่']));
+    addRow('เลขที่โครงการ', row['เลขที่โครงการ']);
+    addRow('ชื่อโครงการ', row['ชื่อโครงการ']);
+    addRow('PO', row['PO']);
+    addRow('ผู้แจ้ง/แผนก', row['ผู้แจ้ง']);
+    addRow('สถานะ', row['สถานะ']);
+    addRow('ผู้รับผิดชอบ', row['ผู้รับผิดชอบ']);
+    addRow('จำนวน', row['จำนวน']);
+    addRow('จำนวนที่ส่ง', row['จำนวนที่ส่ง']);
+    addRow('จำนวนค้างส่ง', row['จำนวนค้างส่ง']);
+    addRow('วันที่เริ่ม', fmtDate(row['วันที่เริ่ม']));
+    addRow('วันที่เสร็จ', fmtDate(row['วันที่เสร็จ']));
+    addRow('ระยะเวลา (วัน)', row['ระยะเวลา']);
+    addRow('วันที่ลงบันทึก', fmtDate(row['วันที่ลงบันทึก']));
+    addRow('ผู้บันทึก', row['ผู้บันทึก']);
+    addRow('รายละเอียด', row['รายละเอียด'], true);
+    if (row['รายการย่อย']) {
+      // รายการย่อย แสดงเป็น bullet list
+      const d = document.createElement('div');
+      d.className = 'field full';
+      const items = String(row['รายการย่อย']).split('\n').filter(Boolean);
+      d.innerHTML = `<label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#9ca3af;">รายการย่อย</label>
+        <ul style="margin:4px 0 0 18px;padding:0;font-size:14px;color:#111827;">
+          ${items.map(i => `<li>${escapeHTML(i)}</li>`).join('')}
+        </ul>`;
+      grid.appendChild(d);
+    }
+    addRow('รายละเอียดการดำเนินการ', row['รายละเอียดการดำเนินการ'], true);
+    addRow('หมายเหตุ', row['หมายเหตุ'], true);
+
+    body.appendChild(grid);
+
+    // ── Footer: action buttons ────────────────────────────────────────────
+    const footer = document.createElement('div');
+    footer.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;width:100%;';
+
+    function mkBtn(label, cls, handler) {
+      const b = document.createElement('button');
+      b.className = `btn ${cls}`;
+      b.innerHTML = label;
+      b.onclick = handler;
+      return b;
+    }
+
+    footer.appendChild(mkBtn('🖨 พิมพ์', 'btn-primary', () => Print.printWorkRequest(idx)));
+    footer.appendChild(mkBtn('📦 ส่งของ', 'btn-success', () => { App.closeModal(); createDeliveryFromJob(idx); }));
+    footer.appendChild(mkBtn('📅 วางแผน', '', () => { App.closeModal(); createScheduleFromJob(idx); }));
+    footer.appendChild(mkBtn('💰 ต้นทุน', '', () => { App.closeModal(); createCostFromJob(idx); }));
+
+    const spacer = document.createElement('div'); spacer.style.flex = '1';
+    footer.appendChild(spacer);
+
+    footer.appendChild(mkBtn('✏️ แก้ไข', 'btn-primary', () => { App.closeModal(); openJob(idx); }));
+    footer.appendChild(mkBtn('🗑 ลบ', 'btn btn-danger', async () => {
+      if (await App.confirmDialog('ต้องการลบรายการนี้หรือไม่?', { danger: true, confirmText: 'ลบ' })) {
+        state.data.jobs.splice(idx, 1);
+        await App.saveAll();
+        App.closeModal();
+        Views.render('jobs');
+      }
+    }));
+    footer.appendChild(mkBtn('ปิด', 'btn-ghost', () => App.closeModal()));
+
+    App.openModal({
+      title: `📋 รายละเอียดใบงาน`,
+      body, footer, large: true
+    });
+  }
+
+  // ── Create Delivery from Job ──────────────────────────────────────────
+  function createDeliveryFromJob(jobIdx) {
+    const job = state.data.jobs[jobIdx] || {};
+    openDelivery(null, {
+      'ประเภท': 'ใบส่งของ (อ้างอิงงานระบบ)',
+      'บริษัท': job['บริษัท'] || '',
+      'PO': job['PO'] || '',
+      'รายละเอียด/อ้างอิง': `อ้างอิงใบงานระบบเลขที่: ${job['เลขที่'] || ''}`,
+      'รายการสินค้า': job['รายการย่อย'] || job['รายละเอียด'] || ''
+    });
+  }
+
+  // ── Create Schedule from Job ──────────────────────────────────────────
+  function createScheduleFromJob(jobIdx) {
+    const job = state.data.jobs[jobIdx] || {};
+    openSchedule(null, {
+      'DocNo': job['เลขที่'] || '',
+      'TaskName': job['รายละเอียด'] || job['ชื่อโครงการ'] || '',
+      'Assignee': job['ผู้รับผิดชอบ'] || ''
+    });
+  }
+
+  // ── Create Cost from Job ──────────────────────────────────────────────
+  function createCostFromJob(jobIdx) {
+    const job = state.data.jobs[jobIdx] || {};
+    openCost(null, {
+      'เลขที่งาน': job['เลขที่'] || '',
+      'เลขที่โครงการ': job['เลขที่โครงการ'] || ''
+    });
+  }
+
   // -------------------- helpers --------------------
   function makeFooter(onSubmit, editing) {
     const footer = document.createElement('div');
@@ -570,5 +836,9 @@ const Forms = (() => {
     return [...set].sort((a,b) => a.localeCompare(b, 'th'));
   }
 
-  return { openJob, openDelivery, openGatepass, openSchedule, openCost };
+  return {
+    openJob, openJobDetail,
+    openDelivery, openGatepass, openSchedule, openCost,
+    createDeliveryFromJob, createScheduleFromJob, createCostFromJob
+  };
 })();

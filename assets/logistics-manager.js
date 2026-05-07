@@ -196,6 +196,10 @@ const LogisticsManager = (() => {
       <div class="title">ใบส่งของ (Delivery Note)</div>
       <div class="sub">สร้างและพิมพ์ใบส่งของชั่วคราว</div>
       <div class="toolbar">
+        <div class="lg-tab-bar" style="margin-right:8px;">
+          <button class="lg-tab active" id="lgDelivTabNew">🆕 สร้างใหม่</button>
+          <button class="lg-tab" id="lgDelivTabHistory">📋 ประวัติ</button>
+        </div>
         <button class="btn" id="lgBtnSearchJob">🔍 ค้นหาจากใบงาน</button>
         <button class="btn btn-primary" id="lgBtnPreviewDO">👁 พรีวิว / พิมพ์</button>
       </div>`;
@@ -326,6 +330,12 @@ const LogisticsManager = (() => {
   }
 
   function _wireDO() {
+    // tab bar
+    const tabNew = document.getElementById('lgDelivTabNew');
+    const tabHist = document.getElementById('lgDelivTabHistory');
+    if (tabNew) tabNew.onclick = () => renderDelivery();
+    if (tabHist) tabHist.onclick = () => { _hTab = 'delivery'; renderHistory(); };
+
     // topbar buttons
     const btnSearch = document.getElementById('lgBtnSearchJob');
     if (btnSearch) btnSearch.onclick = () => _openJobSearch();
@@ -461,7 +471,7 @@ const LogisticsManager = (() => {
     const renderList=()=>{
       const q=jobQ.value.toLowerCase();
       const jobs=state.data.jobs.filter(j=>{
-        const ok = ['กำลังดำเนินการ','งานเสร็จรอส่ง','ส่งงานแล้ว','ปิดงาน'].includes(j['สถานะ']);
+        const ok = !/ปิดงาน/i.test((j['สถานะ']||'').trim());
         return ok && JSON.stringify(j).toLowerCase().includes(q);
       }).slice(0,40);
       list.innerHTML=jobs.length ? jobs.map(j=>`
@@ -531,6 +541,10 @@ const LogisticsManager = (() => {
       <div class="title">ใบนำของออก (Gate Pass) <span style="font-size:14px;color:#2563eb;">#${escapeHTML(_gp.gpNo)}</span></div>
       <div class="sub">ฟอร์มขออนุญาตนำของออกนอกเครือข่าย</div>
       <div class="toolbar">
+        <div class="lg-tab-bar" style="margin-right:8px;">
+          <button class="lg-tab active" id="lgGPTabNew">🆕 สร้างใหม่</button>
+          <button class="lg-tab" id="lgGPTabHistory">📋 ประวัติ</button>
+        </div>
         <button class="btn btn-primary" id="lgBtnPreviewGP">👁 พรีวิว / พิมพ์</button>
       </div>`;
 
@@ -631,6 +645,12 @@ const LogisticsManager = (() => {
   }
 
   function _wireGP(profiles) {
+    // tab bar
+    const tabGPNew = document.getElementById('lgGPTabNew');
+    const tabGPHist = document.getElementById('lgGPTabHistory');
+    if (tabGPNew) tabGPNew.onclick = () => renderGatePass();
+    if (tabGPHist) tabGPHist.onclick = () => { _hTab = 'gatepass'; renderHistory(); };
+
     const btn=document.getElementById('lgBtnPreviewGP');
     if(btn) btn.onclick=()=>_openPrintGP();
 
@@ -717,6 +737,10 @@ const LogisticsManager = (() => {
       <div class="title">ประวัติเอกสาร</div>
       <div class="sub">ค้นหา ตรวจสอบ และดูเอกสารย้อนหลัง</div>
       <div class="toolbar">
+        <div class="lg-tab-bar" style="margin-right:8px;">
+          <button class="lg-tab${_hTab==='delivery'?' active':''}" id="lgHistBackDeliv">🆕 สร้างใหม่</button>
+          <button class="lg-tab active" id="lgHistTabActive">📋 ประวัติ</button>
+        </div>
         <input type="text" id="lgHSearch" placeholder="ค้นหา..." value="${escapeHTML(_hSearch)}" style="width:200px;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:13px;font-family:inherit;">
       </div>`;
 
@@ -769,6 +793,10 @@ const LogisticsManager = (() => {
       </div>
       <div style="font-size:12px;color:#9ca3af;margin-top:8px;">แสดง ${Math.min(data.length,200)} จาก ${data.length} รายการ</div>
     </div>`;
+
+    // topbar back button
+    const histBack = document.getElementById('lgHistBackDeliv');
+    if (histBack) histBack.onclick = () => { if (_hTab==='gatepass') renderGatePass(); else renderDelivery(); };
 
     document.getElementById('lgTabDO').onclick=()=>{ _hTab='delivery'; renderHistory(); };
     document.getElementById('lgTabGP').onclick=()=>{ _hTab='gatepass'; renderHistory(); };
